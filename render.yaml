@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: telegram-straddle-bot
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn main:app -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:10000 --workers 1 --timeout 120
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: MONGODB_URI
+        sync: false
+      - key: ENCRYPTION_KEY
+        sync: false
+      - key: ADMIN_TELEGRAM_IDS
+        sync: false
+      - key: WEBHOOK_URL
+        sync: false
+      - key: ENVIRONMENT
+        value: production
+        
