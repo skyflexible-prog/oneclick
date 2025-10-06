@@ -70,24 +70,27 @@ async def get_orders_collection():
 
 async def create_indexes():
     """Create database indexes for optimal performance"""
-    db = Database.get_database()
+    try:
+        db = Database.get_database()
     
-    # Users collection indexes
-    await db.users.create_index("telegram_id", unique=True)
+        # Users collection indexes
+        await db.users.create_index("telegram_id", unique=True)
+     
+        # API credentials collection indexes
+        await db.api_credentials.create_index([("user_id", 1), ("is_active", 1)])
     
-    # API credentials collection indexes
-    await db.api_credentials.create_index([("user_id", 1), ("is_active", 1)])
+        # Strategies collection indexes
+        await db.strategies.create_index([("user_id", 1), ("name", 1)])
+     
+        # Trades collection indexes
+        await db.trades.create_index([("user_id", 1), ("status", 1)])
+        await db.trades.create_index("entry_time")
     
-    # Strategies collection indexes
-    await db.strategies.create_index([("user_id", 1), ("name", 1)])
+        # Orders collection indexes
+        await db.orders.create_index("trade_id")
+        await db.orders.create_index("order_id_delta")
     
-    # Trades collection indexes
-    await db.trades.create_index([("user_id", 1), ("status", 1)])
-    await db.trades.create_index("entry_time")
-    
-    # Orders collection indexes
-    await db.orders.create_index("trade_id")
-    await db.orders.create_index("order_id_delta")
-    
-    logger.info("Database indexes created successfully")
+        logger.info("Database indexes created successfully")
+    except Exception as e:
+        logger.warning(f"Index creation warning (may already exist): {e}")
   
