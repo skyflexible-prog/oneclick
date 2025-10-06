@@ -75,7 +75,13 @@ async def lifespan(_: FastAPI):
     
     # Connect to MongoDB
     await Database.connect_db()
-    await create_indexes()
+    
+    # Create indexes automatically on startup
+    try:
+        await create_indexes()
+        bot_logger.info("✅ Database indexes created/verified")
+    except Exception as e:
+        bot_logger.error(f"Error creating indexes: {e}")
     
     # Set webhook
     webhook_url = f"{settings.webhook_url}"
