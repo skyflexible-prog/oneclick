@@ -84,4 +84,64 @@ ENVIRONMENT=production
 ## Step 7: Initialize Database
 
 After deployment, run:
+python scripts/setup_mongodb.py
 
+
+## Step 8: Test Your Bot
+
+1. Open Telegram and search for your bot
+2. Send `/start` command
+3. Add Delta Exchange API credentials
+4. Create a strategy
+5. Execute a test trade (with small lot size)
+
+## Environment Variables Reference
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| TELEGRAM_BOT_TOKEN | Bot token from BotFather | 1234567890:ABC... |
+| MONGODB_URI | MongoDB connection string | mongodb+srv://... |
+| ENCRYPTION_KEY | Fernet encryption key | gAAAAAB... |
+| ADMIN_TELEGRAM_IDS | Comma-separated admin IDs | 123456789,987654321 |
+| WEBHOOK_URL | Your Render.com webhook URL | https://yourapp.onrender.com/webhook |
+| ENVIRONMENT | Environment type | production |
+
+## Troubleshooting
+
+### Bot not responding
+- Check Render.com logs
+- Verify webhook URL is correct
+- Test `/health` endpoint
+
+### API errors
+- Verify Delta Exchange API credentials
+- Check IP whitelisting
+- Test API with `scripts/test_delta_api.py`
+
+### Database errors
+- Verify MongoDB connection string
+- Check network access in MongoDB Atlas
+- Run `scripts/setup_mongodb.py`
+
+## Security Checklist
+
+- [ ] API keys encrypted in database
+- [ ] Admin IDs configured
+- [ ] MongoDB network access restricted
+- [ ] Webhook uses HTTPS
+- [ ] Sensitive data not logged
+- [ ] Environment variables set correctly
+
+## Monitoring
+
+Access bot statistics at:
+https://your-app-name.onrender.com/stats
+
+
+## Support
+
+For issues, check:
+1. Render.com logs
+2. MongoDB Atlas logs
+3. Bot error messages
+   
