@@ -1,0 +1,242 @@
+from fastapi import FastAPI, Request, Response
+from telegram import Update
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    CallbackQueryHandler,
+    MessageHandler,
+    ConversationHandler,
+    filters
+)
+from contextlib import asynccontextmanager
+from http import HTTPStatus
+import uvicorn
+
+from config.settings import settings
+from config.database import Database, create_indexes
+from bot.handlers import (
+    start_command,
+    help_command,
+    balance_command,
+    button_callback,
+    add_api_start,
+    receive_api_nickname,
+    receive_api_key,
+    receive_api_secret,
+    list_apis,
+    create_strategy_start,
+    receive_strategy_name,
+    receive_underlying,
+    receive_direction,
+    receive_expiry,
+    receive_lot_size,
+    receive_stop_loss,
+    receive_target,
+    receive_max_capital,
+    receive_strike_offset,
+    list_strategies,
+    trade_menu,
+    execute_trade_preview,
+    confirm_trade_execution,
+    show_positions,
+    view_position_details,
+    close_position_confirm,
+    close_position_execute,
+    show_history,
+    cancel_conversation,
+    error_handler,
+    AWAITING_API_NICKNAME,
+    AWAITING_API_KEY,
+    AWAITING_API_SECRET,
+    AWAITING_STRATEGY_NAME,
+    AWAITING_LOT_SIZE,
+    AWAITING_STOP_LOSS,
+    AWAITING_TARGET,
+    AWAITING_MAX_CAPITAL,
+    AWAITING_STRIKE_OFFSET
+)
+from utils.logger import bot_logger, trade_logger
+
+# Initialize Telegram Bot Application
+ptb = (
+    Application.builder()
+    .updater(None)
+    .token(settings.telegram_bot_token)
+    .read_timeout(7)
+    .get_updates_read_timeout(42)
+    .build()
+)
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    """Application lifespan manager"""
+    bot_logger.info("Starting application...")
+    
+    # Connect to MongoDB
+    await Database.connect_db()
+    await create_indexes()
+    
+    # Set webhook
+    webhook_url = f"{settings.webhook_url}"
+    await ptb.bot.setWebhook(webhook_url)
+    bot_logger.info(f"Webhook set to: {webhook_url}")
+    
+    # Register handlers
+    register_handlers()
+    
+    async with ptb:
+        await ptb.start()
+        bot_logger.info("Bot started successfully!")
+        yield
+        bot_logger.info("Shutting down...")
+        await ptb.stop()
+    
+    # Close database connection
+    await Database.close_db()
+
+
+# Initialize FastAPI app
+app = FastAPI(lifespan=lifespan)
+
+
+def register_handlers():
+    """Register all bot handlers"""
+    
+    # Command handlers
+    ptb.add_handler(CommandHandler("start", start_command))
+    ptb.add_handler(CommandHandler("help", help_command))
+    ptb.add_handler(CommandHandler("balance", balance_command))
+    
+    # API Management Conversation Handler
+    api_conv_handler = ConversationHandler(
+        entry_points=[CallbackQueryHandler(add_api_start, pattern="^add_api$")],
+        states={
+            AWAITING_API_NICKNAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_api_nickname)],
+            AWAITING_API_KEY: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_api_key)],
+            AWAITING_API_SECRET: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_api_secret)]
+        },
+        fallbacks=[CallbackQueryHandler(cancel_conversation, pattern="^main_menu$")],
+        allow_reentry=True
+    )
+    ptb.add_handler(api_conv_handler)
+    
+    # Strategy Creation Conversation Handler
+    strategy_conv_handler = ConversationHandler(
+        entry_points=[CallbackQueryHandler(create_strategy_start, pattern="^create_strategy$")],
+        states={
+            AWAITING_STRATEGY_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_strategy_name)],
+            AWAITING_LOT_SIZE: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_lot_size)],
+            AWAITING_STOP_LOSS: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_stop_loss)],
+            AWAITING_TARGET: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_target)],
+            AWAITING_MAX_CAPITAL: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_max_capital)],
+            AWAITING_STRIKE_OFFSET: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_strike_offset)]
+        },
+        fallbacks=[CallbackQueryHandler(cancel_conversation, pattern="^main_menu$")],
+        allow_reentry=True
+    )
+    ptb.add_handler(strategy_conv_handler)
+    
+    # Callback query handlers
+    ptb.add_handler(CallbackQueryHandler(button_callback, pattern="^main_menu$"))
+    ptb.add_handler(CallbackQueryHandler(button_callback, pattern="^help$"))
+    ptb.add_handler(CallbackQueryHandler(button_callback, pattern="^balance$"))
+    ptb.add_handler(CallbackQueryHandler(button_callback, pattern="^api_menu$"))
+    ptb.add_handler(CallbackQueryHandler(list_apis, pattern="^list_apis$"))
+    ptb.add_handler(CallbackQueryHandler(button_callback, pattern="^view_api_"))
+    ptb.add_handler(CallbackQueryHandler(button_callback, pattern="^activate_api_"))
+    ptb.add_handler(CallbackQueryHandler(button_callback, pattern="^delete_api_"))
+    
+    ptb.add_handler(CallbackQueryHandler(button_callback, pattern="^strategy_menu$"))
+    ptb.add_handler(CallbackQueryHandler(list_strategies, pattern="^list_strategies$"))
+    ptb.add_handler(CallbackQueryHandler(button_callback, pattern="^view_strategy_"))
+    ptb.add_handler(CallbackQueryHandler(button_callback, pattern="^delete_strategy_"))
+    
+    ptb.add_handler(CallbackQueryHandler(receive_underlying, pattern="^underlying_"))
+    ptb.add_handler(CallbackQueryHandler(receive_direction, pattern="^direction_"))
+    ptb.add_handler(CallbackQueryHandler(receive_expiry, pattern="^expiry_"))
+    
+    ptb.add_handler(CallbackQueryHandler(trade_menu, pattern="^trade$"))
+    ptb.add_handler(CallbackQueryHandler(execute_trade_preview, pattern="^execute_"))
+    ptb.add_handler(CallbackQueryHandler(confirm_trade_execution, pattern="^confirm_trade_"))
+    
+    ptb.add_handler(CallbackQueryHandler(show_positions, pattern="^positions$"))
+    ptb.add_handler(CallbackQueryHandler(view_position_details, pattern="^view_position_"))
+    ptb.add_handler(CallbackQueryHandler(close_position_confirm, pattern="^close_position_"))
+    ptb.add_handler(CallbackQueryHandler(close_position_execute, pattern="^confirm_close_"))
+    
+    ptb.add_handler(CallbackQueryHandler(show_history, pattern="^history$"))
+    
+    # Generic callback handler (must be last)
+    ptb.add_handler(CallbackQueryHandler(button_callback))
+    
+    # Error handler
+    ptb.add_error_handler(error_handler)
+    
+    bot_logger.info("All handlers registered successfully")
+
+
+@app.post("/webhook")
+async def process_update(request: Request):
+    """Process incoming Telegram updates via webhook"""
+    try:
+        req = await request.json()
+        update = Update.de_json(req, ptb.bot)
+        await ptb.process_update(update)
+        return Response(status_code=HTTPStatus.OK)
+    except Exception as e:
+        bot_logger.error(f"Error processing update: {e}")
+        return Response(status_code=HTTPStatus.INTERNAL_SERVER_ERROR)
+
+
+@app.get("/")
+async def root():
+    """Root endpoint"""
+    return {
+        "status": "running",
+        "bot": "ATM Straddle Trading Bot",
+        "version": "1.0.0"
+    }
+
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for Uptime Robot / Freshping"""
+    return {
+        "status": "ok",
+        "bot": "healthy",
+        "database": "connected" if Database.client else "disconnected"
+    }
+
+
+@app.get("/stats")
+async def stats():
+    """Basic statistics endpoint (admin only)"""
+    try:
+        db = Database.get_database()
+        
+        user_count = await db.users.count_documents({})
+        strategy_count = await db.strategies.count_documents({})
+        trade_count = await db.trades.count_documents({})
+        open_positions = await db.trades.count_documents({"status": "open"})
+        
+        return {
+            "users": user_count,
+            "strategies": strategy_count,
+            "total_trades": trade_count,
+            "open_positions": open_positions
+        }
+    except Exception as e:
+        bot_logger.error(f"Error fetching stats: {e}")
+        return {"error": str(e)}
+
+
+if __name__ == "__main__":
+    bot_logger.info(f"Starting bot on {settings.host}:{settings.port}")
+    uvicorn.run(
+        "main:app",
+        host=settings.host,
+        port=settings.port,
+        log_level="info"
+  )
+  
