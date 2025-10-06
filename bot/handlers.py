@@ -474,3 +474,659 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # More handlers will be added in next part...
   
+# ==================== STRATEGY MANAGEMENT HANDLERS ====================
+
+async def create_strategy_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Start strategy creation conversation"""
+    user = update.effective_user
+    db = Database.get_database()
+    
+    # Check if user has active API
+    user_data = await crud.get_user_by_telegram_id(db, user.id)
+    apis = await crud.get_user_api_credentials(db, user_data['_id'])
+    active_api = next((api for api in apis if api['is_active']), None)
+    
+    if not active_api:
+        await update.callback_query.answer()
+        await update.callback_query.edit_message_text(
+            "❌ You need to add an API first before creating strategies.",
+            parse_mode=ParseMode.HTML,
+            reply_markup=get_api_management_keyboard()
+        )
+        return ConversationHandler.END
+    
+    session = get_user_session(user.id)
+    session['creating_strategy'] = True
+    session['strategy_data'] = {'api_id': active_api['_id']}
+    
+    await update.callback_query.answer()
+    await update.callback_query.edit_message_text(
+        "🎯 <b>Create New Strategy</b>\n\n"
+        "Please provide a name for this strategy (e.g., 'BTC_Weekly_Conservative'):",
+        parse_mode=ParseMode.HTML,
+        reply_markup=get_cancel_keyboard()
+    )
+    
+    return AWAITING_STRATEGY_NAME
+
+
+async def receive_strategy_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Receive strategy name"""
+    user = update.effective_user
+    session = get_user_session(user.id)
+    name = update.message.text
+    
+    # Validate name
+    is_valid, message = validator.validate_nickname(name)
+    if not is_valid:
+        await update.message.reply_text(
+            f"❌ {message}\n\nPlease provide a valid strategy name:",
+            reply_markup=get_cancel_keyboard()
+        )
+        return AWAITING_STRATEGY_NAME
+    
+    session['strategy_data']['name'] = name
+    
+    await update.message.reply_text(
+        f"✅ Strategy Name: <b>{name}</b>\n\n"
+        "Now select the <b>underlying asset</b>:",
+        parse_mode=ParseMode.HTML,
+        reply_markup=get_underlying_keyboard()
+    )
+    
+    return ConversationHandler.END  # Will be handled by callback
+
+
+async def receive_underlying(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Receive underlying asset selection"""
+    query = update.callback_query
+    user = query.from_user
+    session = get_user_session(user.id)
+    
+    underlying = query.data.split('_')[-1]
+    session['strategy_data']['underlying'] = underlying
+    
+    await query.answer()
+    await query.edit_message_text(
+        f"✅ Underlying: <b>{underlying}</b>\n\n"
+        "Now select the <b>straddle direction</b>:",
+        parse_mode=ParseMode.HTML,
+        reply_markup=get_direction_keyboard()
+    )
+
+
+async def receive_direction(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Receive direction selection"""
+    query = update.callback_query
+    user = query.from_user
+    session = get_user_session(user.id)
+    
+    direction = query.data.split('_')[-1]
+    session['strategy_data']['direction'] = direction
+    
+    direction_text = "Long Straddle (Buy Call + Put)" if direction == "long" else "Short Straddle (Sell Call + Put)"
+    
+    await query.answer()
+    await query.edit_message_text(
+        f"✅ Direction: <b>{direction_text}</b>\n\n"
+        "Now select the <b>expiry type</b>:",
+        parse_mode=ParseMode.HTML,
+        reply_markup=get_expiry_keyboard()
+    )
+
+
+async def receive_expiry(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Receive expiry type selection"""
+    query = update.callback_query
+    user = query.from_user
+    session = get_user_session(user.id)
+    
+    expiry_type = query.data.split('_')[-1]
+    session['strategy_data']['expiry_type'] = expiry_type
+    
+    await query.answer()
+    await query.edit_message_text(
+        f"✅ Expiry: <b>{expiry_type.capitalize()}</b>\n\n"
+        "Please enter the <b>lot size</b> (number of contracts):",
+        parse_mode=ParseMode.HTML,
+        reply_markup=get_cancel_keyboard()
+    )
+    
+    return AWAITING_LOT_SIZE
+
+
+async def receive_lot_size(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Receive lot size"""
+    user = update.effective_user
+    session = get_user_session(user.id)
+    
+    is_valid, message, lot_size = validator.validate_lot_size(update.message.text)
+    if not is_valid:
+        await update.message.reply_text(
+            f"❌ {message}\n\nPlease enter a valid lot size:",
+            reply_markup=get_cancel_keyboard()
+        )
+        return AWAITING_LOT_SIZE
+    
+    session['strategy_data']['lot_size'] = lot_size
+    
+    await update.message.reply_text(
+        f"✅ Lot Size: <b>{lot_size}</b>\n\n"
+        "Please enter the <b>stop loss percentage</b> (e.g., 20 for 20%):",
+        parse_mode=ParseMode.HTML,
+        reply_markup=get_cancel_keyboard()
+    )
+    
+    return AWAITING_STOP_LOSS
+
+
+async def receive_stop_loss(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Receive stop loss percentage"""
+    user = update.effective_user
+    session = get_user_session(user.id)
+    
+    is_valid, message, sl_pct = validator.validate_percentage(update.message.text)
+    if not is_valid:
+        await update.message.reply_text(
+            f"❌ {message}\n\nPlease enter a valid stop loss percentage:",
+            reply_markup=get_cancel_keyboard()
+        )
+        return AWAITING_STOP_LOSS
+    
+    session['strategy_data']['stop_loss_pct'] = sl_pct
+    
+    await update.message.reply_text(
+        f"✅ Stop Loss: <b>{sl_pct}%</b>\n\n"
+        "Please enter the <b>target percentage</b> (optional, send 0 to skip):",
+        parse_mode=ParseMode.HTML,
+        reply_markup=get_cancel_keyboard()
+    )
+    
+    return AWAITING_TARGET
+
+
+async def receive_target(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Receive target percentage"""
+    user = update.effective_user
+    session = get_user_session(user.id)
+    
+    is_valid, message, target_pct = validator.validate_percentage(update.message.text, allow_zero=True)
+    if not is_valid:
+        await update.message.reply_text(
+            f"❌ {message}\n\nPlease enter a valid target percentage (or 0 to skip):",
+            reply_markup=get_cancel_keyboard()
+        )
+        return AWAITING_TARGET
+    
+    session['strategy_data']['target_pct'] = target_pct if target_pct > 0 else None
+    
+    await update.message.reply_text(
+        f"✅ Target: <b>{target_pct}%</b>\n\n"
+        "Please enter the <b>maximum capital allocation</b> in INR:",
+        parse_mode=ParseMode.HTML,
+        reply_markup=get_cancel_keyboard()
+    )
+    
+    return AWAITING_MAX_CAPITAL
+
+
+async def receive_max_capital(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Receive max capital"""
+    user = update.effective_user
+    session = get_user_session(user.id)
+    
+    is_valid, message, capital = validator.validate_capital(update.message.text)
+    if not is_valid:
+        await update.message.reply_text(
+            f"❌ {message}\n\nPlease enter a valid capital amount:",
+            reply_markup=get_cancel_keyboard()
+        )
+        return AWAITING_MAX_CAPITAL
+    
+    session['strategy_data']['max_capital'] = capital
+    
+    await update.message.reply_text(
+        f"✅ Max Capital: <b>{format_currency(capital)}</b>\n\n"
+        "Please enter the <b>strike offset</b> from ATM (0 for ATM, +1 for OTM, -1 for ITM):",
+        parse_mode=ParseMode.HTML,
+        reply_markup=get_cancel_keyboard()
+    )
+    
+    return AWAITING_STRIKE_OFFSET
+
+
+async def receive_strike_offset(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Receive strike offset and save strategy"""
+    user = update.effective_user
+    session = get_user_session(user.id)
+    
+    is_valid, message, offset = validator.validate_strike_offset(update.message.text)
+    if not is_valid:
+        await update.message.reply_text(
+            f"❌ {message}\n\nPlease enter a valid strike offset:",
+            reply_markup=get_cancel_keyboard()
+        )
+        return AWAITING_STRIKE_OFFSET
+    
+    session['strategy_data']['strike_offset'] = offset
+    session['strategy_data']['trailing_sl'] = False  # Default value
+    
+    # Save strategy to database
+    db = Database.get_database()
+    user_data = await crud.get_user_by_telegram_id(db, user.id)
+    session['strategy_data']['user_id'] = user_data['_id']
+    
+    strategy_id = await crud.create_strategy(db, session['strategy_data'])
+    
+    # Build summary
+    strategy = session['strategy_data']
+    direction_text = "Long Straddle" if strategy['direction'] == 'long' else "Short Straddle"
+    target_text = f"{strategy['target_pct']}%" if strategy.get('target_pct') else "Not Set"
+    
+    summary = f"""
+✅ <b>Strategy Created Successfully!</b>
+
+<b>📊 Strategy Details:</b>
+<b>Name:</b> {strategy['name']}
+<b>Underlying:</b> {strategy['underlying']}
+<b>Direction:</b> {direction_text}
+<b>Expiry:</b> {strategy['expiry_type'].capitalize()}
+<b>Lot Size:</b> {strategy['lot_size']}
+<b>Stop Loss:</b> {strategy['stop_loss_pct']}%
+<b>Target:</b> {target_text}
+<b>Max Capital:</b> {format_currency(strategy['max_capital'])}
+<b>Strike Offset:</b> {strategy['strike_offset']} ({"ATM" if offset == 0 else "OTM" if offset > 0 else "ITM"})
+
+You can now execute this strategy with one click using /trade command!
+"""
+    
+    await update.message.reply_text(
+        summary,
+        parse_mode=ParseMode.HTML,
+        reply_markup=get_main_menu_keyboard()
+    )
+    
+    clear_user_session(user.id)
+    return ConversationHandler.END
+
+
+async def list_strategies(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """List all user strategies"""
+    user = update.effective_user
+    db = Database.get_database()
+    
+    user_data = await crud.get_user_by_telegram_id(db, user.id)
+    strategies = await crud.get_user_strategies(db, user_data['_id'])
+    
+    if not strategies:
+        await update.callback_query.answer()
+        await update.callback_query.edit_message_text(
+            "🎯 <b>Trading Strategies</b>\n\n"
+            "You haven't created any strategies yet.",
+            parse_mode=ParseMode.HTML,
+            reply_markup=get_strategy_management_keyboard()
+        )
+        return
+    
+    await update.callback_query.answer()
+    await update.callback_query.edit_message_text(
+        "🎯 <b>Your Trading Strategies</b>\n\n"
+        "Select a strategy to view details:",
+        parse_mode=ParseMode.HTML,
+        reply_markup=get_strategy_list_keyboard(strategies)
+    )
+
+
+async def view_strategy_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """View specific strategy details"""
+    query = update.callback_query
+    strategy_id = query.data.split('_')[-1]
+    
+    db = Database.get_database()
+    strategy = await crud.get_strategy_by_id(db, strategy_id)
+    
+    if not strategy:
+        await query.answer("Strategy not found", show_alert=True)
+        return
+    
+    direction_text = "📈 Long Straddle" if strategy['direction'] == 'long' else "📉 Short Straddle"
+    target_text = f"{strategy.get('target_pct', 0)}%" if strategy.get('target_pct') else "Not Set"
+    
+    details_text = f"""
+<b>🎯 Strategy Details</b>
+
+<b>Name:</b> {strategy['name']}
+<b>Direction:</b> {direction_text}
+<b>Underlying:</b> {strategy['underlying']}
+<b>Expiry:</b> {strategy['expiry_type'].capitalize()}
+
+<b>📊 Parameters:</b>
+<b>Lot Size:</b> {strategy['lot_size']}
+<b>Stop Loss:</b> {strategy['stop_loss_pct']}%
+<b>Target:</b> {target_text}
+<b>Max Capital:</b> {format_currency(strategy['max_capital'])}
+<b>Strike Offset:</b> {strategy['strike_offset']}
+
+<b>Created:</b> {strategy['created_at'].strftime('%Y-%m-%d %H:%M')}
+"""
+    
+    await query.answer()
+    await query.edit_message_text(
+        details_text,
+        parse_mode=ParseMode.HTML,
+        reply_markup=get_strategy_action_keyboard(strategy_id)
+    )
+
+
+async def delete_strategy(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Delete a strategy"""
+    query = update.callback_query
+    strategy_id = query.data.split('_')[-1]
+    
+    db = Database.get_database()
+    await crud.delete_strategy(db, strategy_id)
+    
+    await query.answer("✅ Strategy deleted!", show_alert=True)
+    await list_strategies(update, context)
+
+
+# ==================== TRADE EXECUTION HANDLERS ====================
+
+async def trade_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show trade execution menu"""
+    user = update.effective_user
+    db = Database.get_database()
+    
+    user_data = await crud.get_user_by_telegram_id(db, user.id)
+    strategies = await crud.get_user_strategies(db, user_data['_id'])
+    
+    if not strategies:
+        await update.callback_query.answer()
+        await update.callback_query.edit_message_text(
+            "📊 <b>Execute Trade</b>\n\n"
+            "You need to create a strategy first before trading.",
+            parse_mode=ParseMode.HTML,
+            reply_markup=get_strategy_management_keyboard()
+        )
+        return
+    
+    await update.callback_query.answer()
+    await update.callback_query.edit_message_text(
+        "📊 <b>Execute Trade</b>\n\n"
+        "Select a strategy to execute:",
+        parse_mode=ParseMode.HTML,
+        reply_markup=get_trade_execution_keyboard(strategies)
+    )
+
+
+async def execute_trade_preview(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show trade preview and confirmation"""
+    query = update.callback_query
+    strategy_id = query.data.split('_')[-1]
+    user = query.from_user
+    
+    db = Database.get_database()
+    strategy = await crud.get_strategy_by_id(db, strategy_id)
+    
+    if not strategy:
+        await query.answer("Strategy not found", show_alert=True)
+        return
+    
+    # Get API credentials
+    api_data = await crud.get_api_credential_by_id(db, strategy['api_id'])
+    api_key = encryptor.decrypt(api_data['api_key_encrypted'])
+    api_secret = encryptor.decrypt(api_data['api_secret_encrypted'])
+    
+    await query.answer()
+    await query.edit_message_text(
+        "🔄 <b>Calculating trade details...</b>",
+        parse_mode=ParseMode.HTML
+    )
+    
+    # Fetch market data
+    async with DeltaExchangeAPI(api_key, api_secret) as api:
+        calculator = StraddleCalculator(api)
+        
+        # Get spot price and ATM strike
+        spot_price = await api.get_spot_price(strategy['underlying'])
+        if not spot_price:
+            await query.edit_message_text(
+                "❌ Failed to fetch spot price. Please try again.",
+                reply_markup=get_main_menu_keyboard()
+            )
+            return
+        
+        atm_strike = await calculator.get_atm_strike(strategy['underlying'], strategy['strike_offset'])
+        if not atm_strike:
+            await query.edit_message_text(
+                "❌ Failed to calculate ATM strike. Please try again.",
+                reply_markup=get_main_menu_keyboard()
+            )
+            return
+        
+        # Find option contracts
+        call_contract, put_contract = await calculator.find_option_contracts(
+            strategy['underlying'],
+            atm_strike,
+            strategy['expiry_type']
+        )
+        
+        if not call_contract or not put_contract:
+            await query.edit_message_text(
+                "❌ Failed to find option contracts. Please check expiry settings.",
+                reply_markup=get_main_menu_keyboard()
+            )
+            return
+        
+        # Get premiums
+        call_premium, put_premium = await calculator.get_option_premiums(
+            call_contract['symbol'],
+            put_contract['symbol']
+        )
+        
+        if not call_premium or not put_premium:
+            await query.edit_message_text(
+                "❌ Failed to fetch option premiums. Please try again.",
+                reply_markup=get_main_menu_keyboard()
+            )
+            return
+        
+        total_premium = call_premium + put_premium
+        total_cost = total_premium * strategy['lot_size']
+        
+        # Calculate SL and Target
+        targets = await calculator.calculate_straddle_targets(
+            total_premium,
+            strategy['stop_loss_pct'],
+            strategy.get('target_pct')
+        )
+        
+        # Check margin
+        margin_check = await api.check_margin_requirements(call_contract['symbol'], strategy['lot_size'])
+    
+    # Store trade preview data in session
+    session = get_user_session(user.id)
+    session['trade_preview'] = {
+        'strategy_id': strategy_id,
+        'call_symbol': call_contract['symbol'],
+        'put_symbol': put_contract['symbol'],
+        'strike': atm_strike,
+        'spot_price': spot_price,
+        'call_premium': call_premium,
+        'put_premium': put_premium,
+        'total_premium': total_premium,
+        'total_cost': total_cost,
+        'targets': targets
+    }
+    
+    direction_text = "📈 BUY" if strategy['direction'] == 'long' else "📉 SELL"
+    margin_status = "✅ Sufficient" if margin_check.get('sufficient') else "❌ Insufficient"
+    
+    preview_text = f"""
+<b>📊 Trade Preview</b>
+
+<b>Strategy:</b> {strategy['name']}
+<b>Direction:</b> {direction_text} Straddle
+
+<b>🎯 Trade Details:</b>
+<b>Underlying:</b> {strategy['underlying']}
+<b>Spot Price:</b> {format_currency(spot_price)}
+<b>ATM Strike:</b> {format_currency(atm_strike)}
+
+<b>Call Option:</b> {call_contract['symbol']}
+<b>Call Premium:</b> {format_currency(call_premium)}
+
+<b>Put Option:</b> {put_contract['symbol']}
+<b>Put Premium:</b> {format_currency(put_premium)}
+
+<b>💰 Cost Analysis:</b>
+<b>Total Premium:</b> {format_currency(total_premium)}
+<b>Lot Size:</b> {strategy['lot_size']}
+<b>Total Cost:</b> {format_currency(total_cost)}
+
+<b>🎯 Risk Management:</b>
+<b>Stop Loss:</b> {format_currency(targets['stop_loss'])} (-{format_currency(targets['stop_loss_amount'])})
+<b>Target:</b> {format_currency(targets.get('target', 0)) if targets.get('target') else 'Not Set'}
+
+<b>💳 Margin Status:</b> {margin_status}
+<b>Available:</b> {format_currency(margin_check.get('available', 0))}
+<b>Required:</b> {format_currency(margin_check.get('required', 0))}
+
+⚠️ <b>Confirm to execute this trade</b>
+"""
+    
+    await query.edit_message_text(
+        preview_text,
+        parse_mode=ParseMode.HTML,
+        reply_markup=get_trade_confirmation_keyboard(strategy_id)
+    )
+
+
+async def confirm_trade_execution(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Execute the trade after confirmation"""
+    query = update.callback_query
+    strategy_id = query.data.split('_')[-1]
+    user = query.from_user
+    
+    session = get_user_session(user.id)
+    preview = session.get('trade_preview')
+    
+    if not preview or preview['strategy_id'] != strategy_id:
+        await query.answer("Trade preview expired. Please try again.", show_alert=True)
+        return
+    
+    await query.answer()
+    await query.edit_message_text(
+        "⏳ <b>Executing trade...</b>\n\nPlease wait...",
+        parse_mode=ParseMode.HTML
+    )
+    
+    db = Database.get_database()
+    strategy = await crud.get_strategy_by_id(db, strategy_id)
+    
+    # Get API credentials
+    api_data = await crud.get_api_credential_by_id(db, strategy['api_id'])
+    api_key = encryptor.decrypt(api_data['api_key_encrypted'])
+    api_secret = encryptor.decrypt(api_data['api_secret_encrypted'])
+    
+    # Execute trade
+    async with DeltaExchangeAPI(api_key, api_secret) as api:
+        executor = StraddleExecutor(api)
+        
+        if strategy['direction'] == 'long':
+            result = await executor.execute_long_straddle(
+                preview['call_symbol'],
+                preview['put_symbol'],
+                strategy['lot_size']
+            )
+        else:
+            result = await executor.execute_short_straddle(
+                preview['call_symbol'],
+                preview['put_symbol'],
+                strategy['lot_size']
+            )
+    
+    if not result.get('success'):
+        await query.edit_message_text(
+            f"❌ <b>Trade execution failed!</b>\n\n"
+            f"Error: {result.get('error', 'Unknown error')}\n\n"
+            "Please check your settings and try again.",
+            parse_mode=ParseMode.HTML,
+            reply_markup=get_main_menu_keyboard()
+        )
+        return
+    
+    # Save trade to database
+    user_data = await crud.get_user_by_telegram_id(db, user.id)
+    
+    trade_data = {
+        'user_id': user_data['_id'],
+        'api_id': strategy['api_id'],
+        'strategy_id': strategy_id,
+        'call_symbol': preview['call_symbol'],
+        'put_symbol': preview['put_symbol'],
+        'strike': preview['strike'],
+        'spot_price': preview['spot_price'],
+        'call_entry_price': preview['call_premium'],
+        'put_entry_price': preview['put_premium'],
+        'lot_size': strategy['lot_size']
+    }
+    
+    trade_id = await crud.create_trade(db, trade_data)
+    
+    # Save orders
+    call_order_data = {
+        'trade_id': trade_id,
+        'order_id_delta': result['call_order']['id'],
+        'symbol': preview['call_symbol'],
+        'side': 'buy' if strategy['direction'] == 'long' else 'sell',
+        'order_type': 'market',
+        'quantity': strategy['lot_size'],
+        'price': preview['call_premium'],
+        'status': 'filled'
+    }
+    await crud.create_order(db, call_order_data)
+    
+    put_order_data = {
+        'trade_id': trade_id,
+        'order_id_delta': result['put_order']['id'],
+        'symbol': preview['put_symbol'],
+        'side': 'buy' if strategy['direction'] == 'long' else 'sell',
+        'order_type': 'market',
+        'quantity': strategy['lot_size'],
+        'price': preview['put_premium'],
+        'status': 'filled'
+    }
+    await crud.create_order(db, put_order_data)
+    
+    success_text = f"""
+✅ <b>Trade Executed Successfully!</b>
+
+<b>Trade ID:</b> <code>{trade_id}</code>
+
+<b>Call Order:</b> {result['call_order']['id']}
+<b>Put Order:</b> {result['put_order']['id']}
+
+<b>Entry Premium:</b> {format_currency(preview['total_premium'])}
+<b>Total Cost:</b> {format_currency(preview['total_cost'])}
+
+<b>Stop Loss:</b> {format_currency(preview['targets']['stop_loss'])}
+{f"<b>Target:</b> {format_currency(preview['targets'].get('target', 0))}" if preview['targets'].get('target') else ""}
+
+Your position is now being monitored. You'll receive alerts when SL/Target is hit.
+
+View positions: /positions
+"""
+    
+    await query.edit_message_text(
+        success_text,
+        parse_mode=ParseMode.HTML,
+        reply_markup=get_main_menu_keyboard()
+    )
+    
+    # Start position monitoring
+    # This will be implemented in the main.py file
+    clear_user_session(user.id)
+
+
+# Continue in next part...
