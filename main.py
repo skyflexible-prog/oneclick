@@ -123,27 +123,57 @@ def register_handlers():
             AWAITING_API_SECRET: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_api_secret)]
         },
         fallbacks=[CallbackQueryHandler(cancel_conversation, pattern="^main_menu$")],
-        allow_reentry=True
+        allow_reentry=True,
+        per_message=True
     )
     ptb.add_handler(api_conv_handler)
     
-    # Strategy Creation Conversation Handler
+    # Strategy Creation Conversation Handler - FIXED VERSION
     strategy_conv_handler = ConversationHandler(
         entry_points=[CallbackQueryHandler(create_strategy_start, pattern="^create_strategy$")],
         states={
-            AWAITING_STRATEGY_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_strategy_name)],
-            AWAITING_LOT_SIZE: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_lot_size)],
-            AWAITING_STOP_LOSS: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_stop_loss)],
-            AWAITING_TARGET: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_target)],
-            AWAITING_MAX_CAPITAL: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_max_capital)],
-            AWAITING_STRIKE_OFFSET: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_strike_offset)]
+            AWAITING_STRATEGY_NAME: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_strategy_name),
+                CallbackQueryHandler(cancel_conversation, pattern="^main_menu$")
+            ],
+            AWAITING_LOT_SIZE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_lot_size),
+                CallbackQueryHandler(cancel_conversation, pattern="^main_menu$")
+            ],
+            AWAITING_STOP_LOSS: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_stop_loss),
+                CallbackQueryHandler(cancel_conversation, pattern="^main_menu$")
+            ],
+            AWAITING_TARGET: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_target),
+                CallbackQueryHandler(cancel_conversation, pattern="^main_menu$")
+            ],
+            AWAITING_MAX_CAPITAL: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_max_capital),
+                CallbackQueryHandler(cancel_conversation, pattern="^main_menu$")
+            ],
+            AWAITING_STRIKE_OFFSET: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_strike_offset),
+                CallbackQueryHandler(cancel_conversation, pattern="^main_menu$")
+            ]
         },
-        fallbacks=[CallbackQueryHandler(cancel_conversation, pattern="^main_menu$")],
-        allow_reentry=True
+        fallbacks=[
+            CallbackQueryHandler(cancel_conversation, pattern="^main_menu$"),
+            CommandHandler("cancel", cancel_conversation)
+        ],
+        allow_reentry=True,
+        per_message=True,
+        per_chat=True,
+        per_user=True
     )
     ptb.add_handler(strategy_conv_handler)
     
-    # Callback query handlers
+    # Callback query handlers for buttons (underlying, direction, expiry)
+    ptb.add_handler(CallbackQueryHandler(receive_underlying, pattern="^underlying_"))
+    ptb.add_handler(CallbackQueryHandler(receive_direction, pattern="^direction_"))
+    ptb.add_handler(CallbackQueryHandler(receive_expiry, pattern="^expiry_"))
+    
+    # Other callback handlers
     ptb.add_handler(CallbackQueryHandler(button_callback, pattern="^main_menu$"))
     ptb.add_handler(CallbackQueryHandler(button_callback, pattern="^help$"))
     ptb.add_handler(CallbackQueryHandler(button_callback, pattern="^balance$"))
@@ -157,10 +187,6 @@ def register_handlers():
     ptb.add_handler(CallbackQueryHandler(list_strategies, pattern="^list_strategies$"))
     ptb.add_handler(CallbackQueryHandler(button_callback, pattern="^view_strategy_"))
     ptb.add_handler(CallbackQueryHandler(button_callback, pattern="^delete_strategy_"))
-    
-    ptb.add_handler(CallbackQueryHandler(receive_underlying, pattern="^underlying_"))
-    ptb.add_handler(CallbackQueryHandler(receive_direction, pattern="^direction_"))
-    ptb.add_handler(CallbackQueryHandler(receive_expiry, pattern="^expiry_"))
     
     ptb.add_handler(CallbackQueryHandler(trade_menu, pattern="^trade$"))
     ptb.add_handler(CallbackQueryHandler(execute_trade_preview, pattern="^execute_"))
