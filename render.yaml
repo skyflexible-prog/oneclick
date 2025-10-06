@@ -2,10 +2,13 @@ services:
   - type: web
     name: telegram-straddle-bot
     env: python
+    runtime: python # Render will auto-detect from runtime.txt
     plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn main:app -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:10000 --workers 1 --timeout 120
     envVars:
+      - key: PYTHON_VERSION
+        value: "3.13.4"
       - key: TELEGRAM_BOT_TOKEN
         sync: false
       - key: MONGODB_URI
