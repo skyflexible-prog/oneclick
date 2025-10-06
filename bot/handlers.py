@@ -1128,5 +1128,372 @@ View positions: /positions
     # This will be implemented in the main.py file
     clear_user_session(user.id)
 
-
 # Continue in next part...
+
+# ==================== POSITION MANAGEMENT HANDLERS ====================
+
+async def show_positions(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show all open positions"""
+    user = update.effective_user
+    db = Database.get_database()
+    
+    user_data = await crud.get_user_by_telegram_id(db, user.id)
+    trades = await crud.get_user_trades(db, user_data['_id'], status='open')
+    
+    if not trades:
+        await update.callback_query.answer()
+        await update.callback_query.edit_message_text(
+            "📈 <b>Open Positions</b>\n\n"
+            "You have no open positions at the moment.",
+            parse_mode=ParseMode.HTML,
+            reply_markup=get_main_menu_keyboard()
+        )
+        return
+    
+    # Get live P&L for each position
+    positions_with_pnl = []
+    
+    for trade in trades:
+        # Get API credentials
+        api_data = await crud.get_api_credential_by_id(db, trade['api_id'])
+        api_key = encryptor.decrypt(api_data['api_key_encrypted'])
+        api_secret = encryptor.decrypt(api_data['api_secret_encrypted'])
+        
+        # Fetch live positions
+        async with DeltaExchangeAPI(api_key, api_secret) as api:
+            call_pos = await api.get_positions(trade['call_symbol'])
+            put_pos = await api.get_positions(trade['put_symbol'])
+            
+            total_pnl = 0
+            if 'result' in call_pos and call_pos['result']:
+                total_pnl += float(call_pos['result'][0].get('unrealized_pnl', 0))
+            if 'result' in put_pos and put_pos['result']:
+                total_pnl += float(put_pos['result'][0].get('unrealized_pnl', 0))
+            
+            # Get strategy for underlying
+            strategy = await crud.get_strategy_by_id(db, trade['strategy_id'])
+            
+            positions_with_pnl.append({
+                '_id': trade['_id'],
+                'underlying': strategy.get('underlying', 'BTC'),
+                'pnl': total_pnl,
+                'entry_time': trade['entry_time']
+            })
+    
+    await update.callback_query.answer()
+    await update.callback_query.edit_message_text(
+        "📈 <b>Open Positions</b>\n\n"
+        "Select a position to view details:",
+        parse_mode=ParseMode.HTML,
+        reply_markup=get_position_list_keyboard(positions_with_pnl)
+    )
+
+
+async def view_position_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """View detailed position information"""
+    query = update.callback_query
+    trade_id = query.data.split('_')[-1]
+    
+    db = Database.get_database()
+    trade = await crud.get_trade_by_id(db, trade_id)
+    
+    if not trade:
+        await query.answer("Position not found", show_alert=True)
+        return
+    
+    # Get strategy
+    strategy = await crud.get_strategy_by_id(db, trade['strategy_id'])
+    
+    # Get API credentials
+    api_data = await crud.get_api_credential_by_id(db, trade['api_id'])
+    api_key = encryptor.decrypt(api_data['api_key_encrypted'])
+    api_secret = encryptor.decrypt(api_data['api_secret_encrypted'])
+    
+    # Fetch live data
+    async with DeltaExchangeAPI(api_key, api_secret) as api:
+        call_ticker = await api.get_tickers(trade['call_symbol'])
+        put_ticker = await api.get_tickers(trade['put_symbol'])
+        
+        call_current = float(call_ticker['result'].get('close', 0)) if 'result' in call_ticker else 0
+        put_current = float(put_ticker['result'].get('close', 0)) if 'result' in put_ticker else 0
+        
+        # Calculate P&L
+        monitor = PositionMonitor(api)
+        is_long = strategy['direction'] == 'long'
+        current_pnl = await monitor.calculate_straddle_pnl(
+            trade['call_entry_price'],
+            trade['put_entry_price'],
+            call_current,
+            put_current,
+            trade['lot_size'],
+            is_long
+        )
+    
+    entry_premium = trade['call_entry_price'] + trade['put_entry_price']
+    current_premium = call_current + put_current
+    premium_change = ((current_premium - entry_premium) / entry_premium) * 100
+    
+    pnl_emoji = "🟢" if current_pnl >= 0 else "🔴"
+    direction_text = "📈 Long Straddle" if is_long else "📉 Short Straddle"
+    
+    # Calculate SL and Target levels
+    sl_level = entry_premium * (1 - strategy['stop_loss_pct'] / 100)
+    target_level = entry_premium * (1 + strategy.get('target_pct', 0) / 100) if strategy.get('target_pct') else None
+    
+    details_text = f"""
+<b>📊 Position Details</b>
+
+<b>Strategy:</b> {strategy['name']}
+<b>Direction:</b> {direction_text}
+<b>Underlying:</b> {strategy['underlying']}
+<b>Strike:</b> {format_currency(trade['strike'])}
+
+<b>📈 Call Option:</b>
+<b>Symbol:</b> <code>{trade['call_symbol']}</code>
+<b>Entry:</b> {format_currency(trade['call_entry_price'])}
+<b>Current:</b> {format_currency(call_current)}
+<b>Change:</b> {format_percentage((call_current - trade['call_entry_price']) / trade['call_entry_price'] * 100)}
+
+<b>📉 Put Option:</b>
+<b>Symbol:</b> <code>{trade['put_symbol']}</code>
+<b>Entry:</b> {format_currency(trade['put_entry_price'])}
+<b>Current:</b> {format_currency(put_current)}
+<b>Change:</b> {format_percentage((put_current - trade['put_entry_price']) / trade['put_entry_price'] * 100)}
+
+<b>💰 P&L Summary:</b>
+<b>Entry Premium:</b> {format_currency(entry_premium)}
+<b>Current Premium:</b> {format_currency(current_premium)}
+<b>Premium Change:</b> {format_percentage(premium_change)}
+
+{pnl_emoji} <b>Net P&L:</b> {format_currency(current_pnl)}
+
+<b>🎯 Risk Levels:</b>
+<b>Stop Loss:</b> {format_currency(sl_level)}
+{f"<b>Target:</b> {format_currency(target_level)}" if target_level else ""}
+
+<b>📅 Entry Time:</b> {trade['entry_time'].strftime('%Y-%m-%d %H:%M UTC')}
+"""
+    
+    await query.answer()
+    await query.edit_message_text(
+        details_text,
+        parse_mode=ParseMode.HTML,
+        reply_markup=get_position_action_keyboard(trade_id)
+    )
+
+
+async def close_position_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show confirmation for closing position"""
+    query = update.callback_query
+    trade_id = query.data.split('_')[-1]
+    
+    await query.answer()
+    await query.edit_message_text(
+        "⚠️ <b>Close Position</b>\n\n"
+        "Are you sure you want to close this position?\n\n"
+        "This will execute market orders to exit both call and put options.",
+        parse_mode=ParseMode.HTML,
+        reply_markup=get_close_position_confirmation_keyboard(trade_id)
+    )
+
+
+async def close_position_execute(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Execute position close"""
+    query = update.callback_query
+    trade_id = query.data.split('_')[-1]
+    
+    await query.answer()
+    await query.edit_message_text(
+        "⏳ <b>Closing position...</b>\n\nPlease wait...",
+        parse_mode=ParseMode.HTML
+    )
+    
+    db = Database.get_database()
+    trade = await crud.get_trade_by_id(db, trade_id)
+    
+    if not trade:
+        await query.edit_message_text(
+            "❌ Position not found.",
+            reply_markup=get_main_menu_keyboard()
+        )
+        return
+    
+    # Get strategy
+    strategy = await crud.get_strategy_by_id(db, trade['strategy_id'])
+    
+    # Get API credentials
+    api_data = await crud.get_api_credential_by_id(db, trade['api_id'])
+    api_key = encryptor.decrypt(api_data['api_key_encrypted'])
+    api_secret = encryptor.decrypt(api_data['api_secret_encrypted'])
+    
+    # Close position
+    async with DeltaExchangeAPI(api_key, api_secret) as api:
+        executor = StraddleExecutor(api)
+        is_long = strategy['direction'] == 'long'
+        
+        result = await executor.close_straddle_position(
+            trade['call_symbol'],
+            trade['put_symbol'],
+            trade['lot_size'],
+            is_long
+        )
+    
+    if not result.get('success'):
+        await query.edit_message_text(
+            f"❌ <b>Failed to close position!</b>\n\n"
+            f"Error: {result.get('error', 'Unknown error')}\n\n"
+            "Please try again or close manually from Delta Exchange.",
+            parse_mode=ParseMode.HTML,
+            reply_markup=get_main_menu_keyboard()
+        )
+        return
+    
+    # Get exit prices
+    call_exit = float(result['call_order'].get('average_fill_price', 0))
+    put_exit = float(result['put_order'].get('average_fill_price', 0))
+    
+    # Calculate final P&L
+    async with DeltaExchangeAPI(api_key, api_secret) as api:
+        monitor = PositionMonitor(api)
+        final_pnl = await monitor.calculate_straddle_pnl(
+            trade['call_entry_price'],
+            trade['put_entry_price'],
+            call_exit,
+            put_exit,
+            trade['lot_size'],
+            is_long
+        )
+    
+    # Update trade in database
+    await crud.close_trade(db, trade_id, call_exit, put_exit, final_pnl)
+    
+    pnl_emoji = "🟢" if final_pnl >= 0 else "🔴"
+    
+    close_text = f"""
+✅ <b>Position Closed Successfully!</b>
+
+<b>Call Exit:</b> {format_currency(call_exit)}
+<b>Put Exit:</b> {format_currency(put_exit)}
+
+{pnl_emoji} <b>Final P&L:</b> {format_currency(final_pnl)}
+
+<b>Entry Premium:</b> {format_currency(trade['call_entry_price'] + trade['put_entry_price'])}
+<b>Exit Premium:</b> {format_currency(call_exit + put_exit)}
+
+<b>Holding Period:</b> {(trade['exit_time'] - trade['entry_time']).total_seconds() / 3600:.1f} hours
+
+View trade history: /history
+"""
+    
+    await query.edit_message_text(
+        close_text,
+        parse_mode=ParseMode.HTML,
+        reply_markup=get_main_menu_keyboard()
+    )
+
+
+# ==================== HISTORY HANDLER ====================
+
+async def show_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show trade history"""
+    user = update.effective_user
+    db = Database.get_database()
+    
+    user_data = await crud.get_user_by_telegram_id(db, user.id)
+    closed_trades = await crud.get_user_trades(db, user_data['_id'], status='closed')
+    
+    if not closed_trades:
+        await update.callback_query.answer()
+        await update.callback_query.edit_message_text(
+            "📜 <b>Trade History</b>\n\n"
+            "No trade history available.",
+            parse_mode=ParseMode.HTML,
+            reply_markup=get_main_menu_keyboard()
+        )
+        return
+    
+    # Calculate statistics
+    total_trades = len(closed_trades)
+    winning_trades = len([t for t in closed_trades if t['pnl'] > 0])
+    losing_trades = len([t for t in closed_trades if t['pnl'] < 0])
+    total_pnl = sum(t['pnl'] for t in closed_trades)
+    win_rate = (winning_trades / total_trades * 100) if total_trades > 0 else 0
+    
+    history_text = f"""
+<b>📜 Trade History</b>
+
+<b>📊 Statistics:</b>
+<b>Total Trades:</b> {total_trades}
+<b>Winning Trades:</b> 🟢 {winning_trades}
+<b>Losing Trades:</b> 🔴 {losing_trades}
+<b>Win Rate:</b> {format_percentage(win_rate)}
+<b>Net P&L:</b> {format_currency(total_pnl)}
+
+<b>Recent Trades:</b>
+"""
+    
+    # Show last 5 trades
+    for trade in closed_trades[:5]:
+        strategy = await crud.get_strategy_by_id(db, trade['strategy_id'])
+        pnl_emoji = "🟢" if trade['pnl'] >= 0 else "🔴"
+        
+        history_text += f"\n{pnl_emoji} <b>{strategy['name']}</b>\n"
+        history_text += f"   P&L: {format_currency(trade['pnl'])}\n"
+        history_text += f"   Date: {trade['entry_time'].strftime('%Y-%m-%d')}\n"
+    
+    if total_trades > 5:
+        history_text += f"\n<i>... and {total_trades - 5} more trades</i>"
+    
+    await update.callback_query.answer()
+    await update.callback_query.edit_message_text(
+        history_text,
+        parse_mode=ParseMode.HTML,
+        reply_markup=get_main_menu_keyboard()
+    )
+
+
+# ==================== CONVERSATION CANCEL HANDLER ====================
+
+async def cancel_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Cancel ongoing conversation"""
+    user = update.effective_user
+    clear_user_session(user.id)
+    
+    if update.callback_query:
+        await update.callback_query.answer()
+        await update.callback_query.edit_message_text(
+            "❌ Operation cancelled.",
+            reply_markup=get_main_menu_keyboard()
+        )
+    else:
+        await update.message.reply_text(
+            "❌ Operation cancelled.",
+            reply_markup=get_main_menu_keyboard()
+        )
+    
+    return ConversationHandler.END
+
+
+# ==================== ERROR HANDLER ====================
+
+async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle errors"""
+    bot_logger.error(f"Update {update} caused error {context.error}")
+    
+    error_message = "❌ An error occurred. Please try again or contact support."
+    
+    try:
+        if update.effective_message:
+            await update.effective_message.reply_text(
+                error_message,
+                reply_markup=get_main_menu_keyboard()
+            )
+        elif update.callback_query:
+            await update.callback_query.answer()
+            await update.callback_query.edit_message_text(
+                error_message,
+                reply_markup=get_main_menu_keyboard()
+            )
+    except Exception as e:
+        bot_logger.error(f"Error in error handler: {e}")
+    
