@@ -424,6 +424,32 @@ async def view_api_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def activate_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Activate API"""
+    query = update.callback_query
+    api_id = query.data.split('_')[-1]
+    user = query.from_user
+    
+    db = Database.get_database()
+    user_data = await crud.get_user_by_telegram_id(db, user.id)
+    await crud.set_active_api(db, user_data['_id'], api_id)
+    
+    await query.answer("✅ API activated!", show_alert=True)
+    await view_api_details(update, context)
+
+
+async def delete_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Delete API"""
+    query = update.callback_query
+    api_id = query.data.split('_')[-1]
+    
+    db = Database.get_database()
+    await crud.delete_api_credential(db, api_id)
+    
+    await query.answer("✅ API deleted!", show_alert=True)
+    await list_apis(update, context)
+
+
 # ==================== CALLBACK QUERY HANDLERS ====================
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
