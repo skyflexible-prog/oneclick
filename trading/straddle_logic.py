@@ -96,15 +96,18 @@ class StraddleCalculator:
     def _filter_soonest_expiring(self, options: List[Dict]) -> List[Dict]:
         """
         Filter options to get those expiring soonest (for daily expiry)
-        Returns options expiring within next 24 hours
+        Returns options expiring within next 48 hours (to account for timezone issues)
         """
         try:
             from datetime import datetime, timedelta
         
             now = datetime.utcnow()
-            next_24h = now + timedelta(hours=24)
+            next_48h = now + timedelta(hours=48)  # Extended to 48 hours for safety
         
-            # Parse settlement times and find soonest
+            trade_logger.info(f"Current UTC time: {now}")
+            trade_logger.info(f"Looking for options expiring before: {next_48h}")
+        
+            # Parse settlement times and collect options
             options_with_expiry = []
         
             for option in options:
@@ -113,41 +116,89 @@ class StraddleCalculator:
                     continue
             
                 try:
-                    # Parse ISO 8601 format (e.g., '2025-10-07T12:00:00Z')
-                    settlement_time = datetime.fromisoformat(
-                        settlement_time_str.replace('Z', '+00:00')
-                    ).replace(tzinfo=None)
+                    # Parse ISO 8601 format
+                    # Handle both 'Z' and '+00:00' timezone formats
+                    if settlement_time_str.endswith('Z'):
+                        settlement_time_str = settlement_time_str[:-1] + '+00:00'
                 
-                    # Check if expires within next 24 hours
-                    if now <= settlement_time <= next_24h:
+                    settlement_time = datetime.fromisoformat(settlement_time_str)
+                
+                    # Remove timezone for comparison
+                    if settlement_time.tzinfo is not None:
+                        settlement_time = settlement_time.replace(tzinfo=None)
+                
+                    # Check if expires within next 48 hours AND hasn't expired yet
+                    if now <= settlement_time <= next_48h:
                         options_with_expiry.append({
                             'option': option,
                             'settlement_time': settlement_time
                         })
                 except Exception as e:
-                    trade_logger.warning(f"Error parsing settlement time: {e}")
+                    trade_logger.warning(f"Error parsing settlement time '{settlement_time_str}': {e}")
                     continue
+            
+            trade_logger.info(f"Found {len(options_with_expiry)} options expiring within next 48 hours")
         
             if not options_with_expiry:
-                trade_logger.error("No options expiring in next 24 hours")
-                return []
+                # If no options in next 48 hours, just get the soonest available
+                trade_logger.warning("No options in next 48h, getting soonest available")
+            
+                all_options_with_expiry = []
+                for option in options:
+                    settlement_time_str = option.get('settlement_time')
+                    if not settlement_time_str:
+                        continue
+                
+                    try:
+                        if settlement_time_str.endswith('Z'):
+                            settlement_time_str = settlement_time_str[:-1] + '+00:00'
+                        
+                        settlement_time = datetime.fromisoformat(settlement_time_str)
+                        if settlement_time.tzinfo is not None:
+                            settlement_time = settlement_time.replace(tzinfo=None)
+                    
+                        # Only future expiries
+                        if settlement_time > now:
+                            all_options_with_expiry.append({
+                                'option': option,
+                                'settlement_time': settlement_time
+                            })
+                    except:
+                        continue
+            
+                if not all_options_with_expiry:
+                    trade_logger.error("No future expiring options found at all!")
+                    return []
+            
+                # Use soonest available
+                soonest_expiry = min(o['settlement_time'] for o in all_options_with_expiry)
+                trade_logger.info(f"Using soonest available expiry: {soonest_expiry}")
+            
+                filtered_options = [
+                    o['option'] for o in all_options_with_expiry 
+                    if o['settlement_time'] == soonest_expiry
+                ]
+            
+                return filtered_options
         
-            # Find the soonest expiry time
+            # Find the soonest expiry time from those expiring soon
             soonest_expiry = min(o['settlement_time'] for o in options_with_expiry)
             trade_logger.info(f"Soonest expiry: {soonest_expiry}")
         
-            # Return only options with that expiry time
+            # Return only options with that exact expiry time
             filtered_options = [
                 o['option'] for o in options_with_expiry 
                 if o['settlement_time'] == soonest_expiry
             ]
         
+            trade_logger.info(f"Returning {len(filtered_options)} options at strike expiring at {soonest_expiry}")
+        
             return filtered_options
         
         except Exception as e:
-            trade_logger.error(f"Error filtering soonest expiring: {e}")
-            return options
-    
+            trade_logger.error(f"Error filtering soonest expiring: {e}", exc_info=True)
+            return options  # Return all if filtering fails
+
     def _get_expiry_date(self, expiry_type: str) -> Optional[str]:
         """
         Convert expiry type to date format DD-MM-YYYY
