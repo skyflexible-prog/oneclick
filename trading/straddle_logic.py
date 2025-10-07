@@ -11,30 +11,39 @@ class StraddleCalculator:
     def __init__(self, api: DeltaExchangeAPI):
         self.api = api
     
-    async def get_atm_strike(self, underlying: str, offset: int = 0) -> Optional[float]:
+    async def get_atm_strike(self, underlying: str, offset: int = 0, available_strikes: List[float] = None) -> Optional[float]:
         """
         Get ATM strike price with optional offset
-        Rounds to nearest 100 for fine granularity
-        Examples: 123530 → 123500, 123690 → 123700
+        If available_strikes provided, finds nearest from those
         """
         try:
             spot_price = await self.api.get_spot_price(underlying)
             if not spot_price:
                 return None
+        
+            # If we have available strikes, find the nearest one
+            if available_strikes:
+                atm_strike = min(available_strikes, key=lambda x: abs(x - spot_price))
             
-            # FIXED: Always use 100 interval for nearest rounding
-            strike_interval = 100.0
-            
-            # Calculate ATM strike (nearest 100)
-            atm_strike = round(spot_price / strike_interval) * strike_interval
-            
-            # Apply offset if specified
-            if offset != 0:
-                atm_strike = atm_strike + (offset * strike_interval)
-            
+                # Apply offset if specified
+                if offset != 0:
+                    strike_index = available_strikes.index(atm_strike)
+                    new_index = strike_index + offset
+                
+                    # Ensure index is valid
+                    if 0 <= new_index < len(available_strikes):
+                        atm_strike = available_strikes[new_index]
+            else:
+                # Fallback: Round to nearest 100
+                strike_interval = 100.0
+                atm_strike = round(spot_price / strike_interval) * strike_interval
+                
+                if offset != 0:
+                    atm_strike = atm_strike + (offset * strike_interval)
+        
             trade_logger.info(f"ATM Strike for {underlying}: {atm_strike} (Spot: {spot_price}, Offset: {offset})")
             return atm_strike
-        
+    
         except Exception as e:
             trade_logger.error(f"Error calculating ATM strike: {e}", exc_info=True)
             return None
