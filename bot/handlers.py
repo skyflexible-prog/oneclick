@@ -823,10 +823,20 @@ async def receive_target(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     session = get_user_session(user.id)
     
-    is_valid, message, target_pct = validator.validate_percentage(update.message.text, required=False)
-    if not is_valid:
+    # ✅ Manual validation without using validator
+    try:
+        target_pct = float(update.message.text)
+        
+        if target_pct < 0 or target_pct > 500:
+            await update.message.reply_text(
+                "❌ Invalid percentage. Please enter between 0 and 500:",
+                reply_markup=get_cancel_keyboard()
+            )
+            return AWAITING_TARGET
+        
+    except ValueError:
         await update.message.reply_text(
-            f"❌ {message}\n\nPlease enter a valid target percentage or 0 to skip:",
+            "❌ Invalid number. Please enter target percentage or 0 to skip:",
             reply_markup=get_cancel_keyboard()
         )
         return AWAITING_TARGET
@@ -849,9 +859,9 @@ async def receive_target(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 ]
             ])
         )
-        return AWAITING_TARGET_ORDER_CHOICE  # ✅ NEW STATE
+        return AWAITING_TARGET_ORDER_CHOICE
     else:
-        # No target, skip to max capital
+        # No target (0 entered), skip to max capital
         session['strategy_data']['use_target_order'] = False
         session['strategy_data']['target_trigger_pct'] = None
         
