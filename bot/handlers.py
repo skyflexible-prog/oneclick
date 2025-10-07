@@ -987,7 +987,10 @@ async def execute_trade_preview(update: Update, context: ContextTypes.DEFAULT_TY
     margin_status = "✅ Sufficient" if margin_check.get('sufficient') else "❌ Insufficient"
     
     preview_text = f"""
-<b>📊 Trade Preview</b>
+<b>📊 Trade Preview - {direction_text} Straddle</b>
+
+<b>🔑 Active API:</b> {active_api['nickname']}
+<b>💰 Available Balance:</b> ₹{available_balance:,.2f}
 
 <b>Strategy:</b> {strategy['name']}
 <b>Direction:</b> {direction_text} Straddle
