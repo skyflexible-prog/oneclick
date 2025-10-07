@@ -1304,7 +1304,7 @@ async def confirm_trade_execution(update: Update, context: ContextTypes.DEFAULT_
         )
         return ConversationHandler.END
     
-    # Get strategy_id from preview (stored during execute_trade_preview)
+    # Get strategy_id from preview
     strategy_id = preview['strategy_id']
     
     await query.answer()
@@ -1320,22 +1320,18 @@ async def confirm_trade_execution(update: Update, context: ContextTypes.DEFAULT_
     selected_api_id = context.user_data.get('selected_api_id')
 
     if selected_api_id:
-        # Use the API selected during trade menu
         api_data = await crud.get_api_credential_by_id(db, ObjectId(selected_api_id))
     else:
-        # Fallback to strategy's default API
         api_data = await crud.get_api_credential_by_id(db, strategy['api_id'])
 
     api_key = encryptor.decrypt(api_data['api_key_encrypted'])
     api_secret = encryptor.decrypt(api_data['api_secret_encrypted'])
     
-    # Execute trade
-    # Execute trade with stop-loss and target orders
+    # ✅ Execute trade with stop-loss and target orders
     async with DeltaExchangeAPI(api_key, api_secret) as api:
         executor = StraddleExecutor(api)
     
         if strategy['direction'] == 'long':
-            # ✅ LONG STRADDLE - Pass SL and Target parameters
             result = await executor.execute_long_straddle(
                 call_symbol=preview['call_symbol'],
                 put_symbol=preview['put_symbol'],
@@ -1347,13 +1343,12 @@ async def confirm_trade_execution(update: Update, context: ContextTypes.DEFAULT_
                 target_trigger_pct=strategy.get('target_trigger_pct')
             )
         else:
-            # ✅ SHORT STRADDLE - Pass SL and Target parameters
             result = await executor.execute_short_straddle(
                 call_symbol=preview['call_symbol'],
                 put_symbol=preview['put_symbol'],
                 lot_size=strategy['lot_size'],
-                stop_loss_pct=strategy['stop_loss_pct'],  # Legacy parameter
-                use_stop_loss_order=strategy.get('use_stop_loss_order', True),  # Default True for short
+                stop_loss_pct=strategy['stop_loss_pct'],
+                use_stop_loss_order=strategy.get('use_stop_loss_order', True),
                 sl_trigger_pct=strategy.get('sl_trigger_pct'),
                 sl_limit_pct=strategy.get('sl_limit_pct'),
                 use_target_order=strategy.get('use_target_order', False),
@@ -1368,12 +1363,10 @@ async def confirm_trade_execution(update: Update, context: ContextTypes.DEFAULT_
             parse_mode=ParseMode.HTML,
             reply_markup=get_main_menu_keyboard()
         )
-        return
+        return ConversationHandler.END
     
     # Save trade to database
     user_data = await crud.get_user_by_telegram_id(db, user.id)
-    
-    # Use selected API or strategy's default
     actual_api_id = ObjectId(selected_api_id) if selected_api_id else strategy['api_id']
 
     trade_data = {
@@ -1384,56 +1377,84 @@ async def confirm_trade_execution(update: Update, context: ContextTypes.DEFAULT_
         'put_symbol': preview['put_symbol'],
         'strike': preview['strike'],
         'spot_price': preview['spot_price'],
-        'call_entry_price': preview['call_premium'],
-        'put_entry_price': preview['put_premium'],
+        'call_entry_price': result.get('call_price', preview['call_premium']),
+        'put_entry_price': result.get('put_price', preview['put_premium']),
         'lot_size': strategy['lot_size']
     }
     
     trade_id = await crud.create_trade(db, trade_data)
     
-    # Save orders
-    call_order_data = {
-        'trade_id': trade_id,
-        'order_id_delta': result['call_order']['id'],
-        'symbol': preview['call_symbol'],
-        'side': 'buy' if strategy['direction'] == 'long' else 'sell',
-        'order_type': 'market',
-        'quantity': strategy['lot_size'],
-        'price': preview['call_premium'],
-        'status': 'filled'
-    }
-    await crud.create_order(db, call_order_data)
+    # Save main orders
+    if result.get('call_order'):
+        call_order_data = {
+            'trade_id': trade_id,
+            'order_id_delta': result['call_order']['result']['id'],
+            'symbol': preview['call_symbol'],
+            'side': 'buy' if strategy['direction'] == 'long' else 'sell',
+            'order_type': 'market',
+            'quantity': strategy['lot_size'],
+            'price': result.get('call_price', preview['call_premium']),
+            'status': 'filled'
+        }
+        await crud.create_order(db, call_order_data)
     
-    put_order_data = {
-        'trade_id': trade_id,
-        'order_id_delta': result['put_order']['id'],
-        'symbol': preview['put_symbol'],
-        'side': 'buy' if strategy['direction'] == 'long' else 'sell',
-        'order_type': 'market',
-        'quantity': strategy['lot_size'],
-        'price': preview['put_premium'],
-        'status': 'filled'
-    }
-    await crud.create_order(db, put_order_data)
+    if result.get('put_order'):
+        put_order_data = {
+            'trade_id': trade_id,
+            'order_id_delta': result['put_order']['result']['id'],
+            'symbol': preview['put_symbol'],
+            'side': 'buy' if strategy['direction'] == 'long' else 'sell',
+            'order_type': 'market',
+            'quantity': strategy['lot_size'],
+            'price': result.get('put_price', preview['put_premium']),
+            'status': 'filled'
+        }
+        await crud.create_order(db, put_order_data)
     
-    # FIXED: Changed ₹ to $
+    # Clear session
+    clear_user_session(user.id)
+    
+    # ✅ Build success message with SL/Target info
+    total_entry = (result.get('call_price', preview['call_premium']) + 
+                   result.get('put_price', preview['put_premium']))
+    total_cost = total_entry * strategy['lot_size']
+    
+    # Order status info
+    sl_info = ""
+    if strategy.get('use_stop_loss_order') and result.get('sl_orders'):
+        num_sl_orders = len(result['sl_orders'])
+        sl_info = f"\n🛡️ <b>Stop-Loss Orders:</b> {num_sl_orders} orders placed ✅"
+        if strategy.get('sl_trigger_pct'):
+            sl_info += f"\n   Trigger: {strategy['sl_trigger_pct']}% loss"
+    
+    target_info = ""
+    if strategy.get('use_target_order') and result.get('target_orders'):
+        num_target_orders = len(result['target_orders'])
+        target_info = f"\n🎯 <b>Target Orders:</b> {num_target_orders} orders placed ✅"
+        if strategy.get('target_trigger_pct'):
+            target_info += f"\n   Target: {strategy['target_trigger_pct']}% profit"
+    
     success_text = f"""
 ✅ <b>Trade Executed Successfully!</b>
 
-<b>Trade ID:</b> <code>{trade_id}</code>
+📊 <b>Strategy:</b> {strategy['name']}
+📈 <b>Direction:</b> {strategy['direction'].upper()} Straddle
 
-<b>Call Order:</b> {result['call_order']['id']}
-<b>Put Order:</b> {result['put_order']['id']}
+<b>📋 Trade Details:</b>
+🔵 <b>Call:</b> {preview['call_symbol']}
+   Entry: ₹{result.get('call_price', preview['call_premium']):.2f}
 
-<b>Entry Premium:</b> ${preview['total_premium']:.2f}
-<b>Total Cost:</b> ${preview['total_cost']:.2f}
+🟠 <b>Put:</b> {preview['put_symbol']}
+   Entry: ₹{result.get('put_price', preview['put_premium']):.2f}
 
-<b>Stop Loss:</b> ${preview['targets']['stop_loss']:.2f}
-{f"<b>Target:</b> ${preview['targets'].get('target', 0):.2f}" if preview['targets'].get('target') else ""}
+📦 <b>Lot Size:</b> {strategy['lot_size']}
+💰 <b>Total Premium:</b> ₹{total_entry:.2f}
+💵 <b>Total Cost:</b> ₹{total_cost:.2f}{sl_info}{target_info}
 
-Your position is now being monitored. You'll receive alerts when SL/Target is hit.
+📊 <b>Position Status:</b> OPEN
+🆔 <b>Trade ID:</b> <code>{trade_id}</code>
 
-View positions: /positions
+View your position: /positions
 """
     
     await query.edit_message_text(
@@ -1442,9 +1463,8 @@ View positions: /positions
         reply_markup=get_main_menu_keyboard()
     )
     
-    # Start position monitoring
-    # This will be implemented in the main.py file
-    clear_user_session(user.id)
+    return ConversationHandler.END
+
     
 # ==================== POSITION MANAGEMENT HANDLERS ====================
 
