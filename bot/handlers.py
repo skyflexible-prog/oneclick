@@ -1247,7 +1247,7 @@ async def execute_trade_preview(update: Update, context: ContextTypes.DEFAULT_TY
 <b>📊 Trade Preview - {direction_text} Straddle</b>
 
 <b>🔑 Active API:</b> {api_data['nickname']}
-<b>💰 Available Balance:</b> ₹{available_balance:,.2f}
+<b>💰 Available Balance:</b> ${available_balance:,.2f}
 
 <b>Strategy:</b> {strategy['name']}
 <b>Direction:</b> {direction_text} Straddle
@@ -1442,10 +1442,10 @@ async def confirm_trade_execution(update: Update, context: ContextTypes.DEFAULT_
 
 <b>📋 Trade Details:</b>
 🔵 <b>Call:</b> {preview['call_symbol']}
-   Entry: ₹{result.get('call_price', preview['call_premium']):.2f}
+   Entry: ${result.get('call_price', preview['call_premium']):.2f}
 
 🟠 <b>Put:</b> {preview['put_symbol']}
-   Entry: ₹{result.get('put_price', preview['put_premium']):.2f}
+   Entry: ${result.get('put_price', preview['put_premium']):.2f}
 
 📦 <b>Lot Size:</b> {strategy['lot_size']}
 💰 <b>Total Premium:</b> ${total_entry:.2f}
