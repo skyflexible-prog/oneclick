@@ -161,8 +161,20 @@ def register_handlers():
             AWAITING_STOP_LOSS: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_stop_loss)
             ],
+            AWAITING_SL_ORDER_CHOICE: [  # ✅ NEW STATE
+                CallbackQueryHandler(receive_sl_order_choice, pattern="^sl_order_")
+            ],
+            AWAITING_SL_TRIGGER: [  # ✅ NEW STATE
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_sl_trigger)
+            ],
+            AWAITING_SL_LIMIT: [  # ✅ NEW STATE
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_sl_limit)
+            ],
             AWAITING_TARGET: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_target)
+            ],
+            AWAITING_TARGET_ORDER_CHOICE: [  # ✅ NEW STATE
+                CallbackQueryHandler(receive_target_order_choice, pattern="^target_order_")
             ],
             AWAITING_MAX_CAPITAL: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_max_capital)
