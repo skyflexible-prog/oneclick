@@ -122,34 +122,45 @@ class StraddleCalculator:
         try:
             # Get option chain
             options = await self.get_option_chain(underlying, expiry_type)
-            
+        
             if not options:
                 trade_logger.error("No options found in chain")
                 return None, None
-            
+        
             trade_logger.info(f"Searching for strike {strike} in {len(options)} options")
-            
-            # Filter by strike (allow 50 tolerance)
+        
+            # FIXED: Get all available strikes
+            available_strikes = sorted(set([float(o.get('strike_price', 0)) 
+                                       for o in options if 'strike_price' in o]))
+        
+            trade_logger.info(f"Available strikes: {available_strikes[:20]}")
+        
+            # FIXED: Find nearest strike if exact not found
+            if strike not in available_strikes:
+                nearest_strike = min(available_strikes, key=lambda x: abs(x - strike))
+                trade_logger.info(f"⚠️ Strike {strike} not available. Using nearest: {nearest_strike}")
+                strike = nearest_strike
+            else:
+                trade_logger.info(f"✅ Exact strike {strike} found")
+        
+            # Filter by strike (small tolerance for floating point)
             strike_options = [o for o in options if 
                             'strike_price' in o and 
-                            abs(float(o['strike_price']) - strike) < 50]
+                            abs(float(o['strike_price']) - strike) < 1.0]
             
-            trade_logger.info(f"Found {len(strike_options)} options at strike ~{strike}")
-            
+            trade_logger.info(f"Found {len(strike_options)} options at strike {strike}")
+        
             if not strike_options:
-                # Log available strikes
-                available_strikes = sorted(set([float(o.get('strike_price', 0)) 
-                                               for o in options if 'strike_price' in o]))[:20]
-                trade_logger.error(f"Strike {strike} not found. Available strikes: {available_strikes}")
+                trade_logger.error(f"No options at strike {strike}")
                 return None, None
-            
+        
             # Find call and put at exact same strike
             calls = [o for o in strike_options if o.get('contract_type') == 'call_options']
             puts = [o for o in strike_options if o.get('contract_type') == 'put_options']
-            
+        
             call_contract = calls[0] if calls else None
             put_contract = puts[0] if puts else None
-            
+        
             if call_contract:
                 trade_logger.info(f"✅ Found Call: {call_contract.get('symbol')} at {call_contract.get('strike_price')}")
             else:
@@ -159,13 +170,13 @@ class StraddleCalculator:
                 trade_logger.info(f"✅ Found Put: {put_contract.get('symbol')} at {put_contract.get('strike_price')}")
             else:
                 trade_logger.error("❌ No Put option found")
-            
-            return call_contract, put_contract
         
+            return call_contract, put_contract
+    
         except Exception as e:
             trade_logger.error(f"Error finding option contracts: {e}", exc_info=True)
             return None, None
-    
+
     # ... rest of the methods remain the same (get_option_premiums, calculate_straddle_cost, etc.) ...
     
     async def get_option_premiums(
