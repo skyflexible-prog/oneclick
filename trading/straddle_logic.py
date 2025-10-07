@@ -51,42 +51,102 @@ class StraddleCalculator:
     async def get_option_chain(self, underlying: str, expiry_type: str) -> List[Dict]:
         """
         Get option chain from Delta Exchange
-        Uses: /v2/tickers?contract_types=call_options,put_options&underlying_asset_symbols=BTC&expiry_date=DD-MM-YYYY
+        For 'daily', gets soonest expiring options (today/tomorrow)
         """
         try:
+            from datetime import datetime, timedelta
+        
             # Calculate expiry date based on expiry_type
             expiry_date = self._get_expiry_date(expiry_type)
-            if not expiry_date:
-                trade_logger.error(f"Could not determine expiry date for {expiry_type}")
-                return []
-            
+        
             # Build option chain endpoint
             params = {
                 'contract_types': 'call_options,put_options',
                 'underlying_asset_symbols': underlying.upper()
             }
-            
-            # Add expiry date if specific
-            if expiry_date != 'all':
+        
+            # Add expiry date filter if specific date provided
+            if expiry_date:
                 params['expiry_date'] = expiry_date
-            
-            trade_logger.info(f"Fetching option chain: {underlying}, expiry: {expiry_date}")
-            
+                trade_logger.info(f"Fetching option chain: {underlying}, expiry: {expiry_date}")
+            else:
+                trade_logger.info(f"Fetching option chain: {underlying}, expiry: {expiry_type} (will filter)")
+        
             # Make request
             response = await self.api._make_request('GET', '/v2/tickers', params=params)
-            
+        
             if not response or 'result' not in response:
                 trade_logger.error(f"Invalid response from option chain: {response}")
                 return []
-            
+        
             options = response['result']
             trade_logger.info(f"Fetched {len(options)} options for {underlying}")
-            
+        
+            # For daily expiry, filter to get soonest expiring
+            if expiry_type.lower() == 'daily':
+                options = self._filter_soonest_expiring(options)
+                trade_logger.info(f"After filtering for soonest expiry: {len(options)} options")
+        
             return options
-            
+        
         except Exception as e:
             trade_logger.error(f"Error fetching option chain: {e}", exc_info=True)
             return []
+
+    def _filter_soonest_expiring(self, options: List[Dict]) -> List[Dict]:
+        """
+        Filter options to get those expiring soonest (for daily expiry)
+        Returns options expiring within next 24 hours
+        """
+        try:
+            from datetime import datetime, timedelta
+        
+            now = datetime.utcnow()
+            next_24h = now + timedelta(hours=24)
+        
+            # Parse settlement times and find soonest
+            options_with_expiry = []
+        
+            for option in options:
+                settlement_time_str = option.get('settlement_time')
+                if not settlement_time_str:
+                    continue
+            
+                try:
+                    # Parse ISO 8601 format (e.g., '2025-10-07T12:00:00Z')
+                    settlement_time = datetime.fromisoformat(
+                        settlement_time_str.replace('Z', '+00:00')
+                    ).replace(tzinfo=None)
+                
+                    # Check if expires within next 24 hours
+                    if now <= settlement_time <= next_24h:
+                        options_with_expiry.append({
+                            'option': option,
+                            'settlement_time': settlement_time
+                        })
+                except Exception as e:
+                    trade_logger.warning(f"Error parsing settlement time: {e}")
+                    continue
+        
+            if not options_with_expiry:
+                trade_logger.error("No options expiring in next 24 hours")
+                return []
+        
+            # Find the soonest expiry time
+            soonest_expiry = min(o['settlement_time'] for o in options_with_expiry)
+            trade_logger.info(f"Soonest expiry: {soonest_expiry}")
+        
+            # Return only options with that expiry time
+            filtered_options = [
+                o['option'] for o in options_with_expiry 
+                if o['settlement_time'] == soonest_expiry
+            ]
+        
+            return filtered_options
+        
+        except Exception as e:
+            trade_logger.error(f"Error filtering soonest expiring: {e}")
+            return options
     
     def _get_expiry_date(self, expiry_type: str) -> Optional[str]:
         """
