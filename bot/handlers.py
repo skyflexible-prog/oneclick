@@ -1330,22 +1330,34 @@ async def confirm_trade_execution(update: Update, context: ContextTypes.DEFAULT_
     api_secret = encryptor.decrypt(api_data['api_secret_encrypted'])
     
     # Execute trade
+    # Execute trade with stop-loss and target orders
     async with DeltaExchangeAPI(api_key, api_secret) as api:
         executor = StraddleExecutor(api)
-        
+    
         if strategy['direction'] == 'long':
+            # ✅ LONG STRADDLE - Pass SL and Target parameters
             result = await executor.execute_long_straddle(
-                preview['call_symbol'],
-                preview['put_symbol'],
-                strategy['lot_size']
+                call_symbol=preview['call_symbol'],
+                put_symbol=preview['put_symbol'],
+                lot_size=strategy['lot_size'],
+                use_stop_loss_order=strategy.get('use_stop_loss_order', False),
+                sl_trigger_pct=strategy.get('sl_trigger_pct'),
+                sl_limit_pct=strategy.get('sl_limit_pct'),
+                use_target_order=strategy.get('use_target_order', False),
+                target_trigger_pct=strategy.get('target_trigger_pct')
             )
         else:
-            # FIXED: Added stop_loss_pct parameter
+            # ✅ SHORT STRADDLE - Pass SL and Target parameters
             result = await executor.execute_short_straddle(
-                preview['call_symbol'],
-                preview['put_symbol'],
-                strategy['lot_size'],
-                stop_loss_pct=strategy['stop_loss_pct']  # ← ADD THIS LINE
+                call_symbol=preview['call_symbol'],
+                put_symbol=preview['put_symbol'],
+                lot_size=strategy['lot_size'],
+                stop_loss_pct=strategy['stop_loss_pct'],  # Legacy parameter
+                use_stop_loss_order=strategy.get('use_stop_loss_order', True),  # Default True for short
+                sl_trigger_pct=strategy.get('sl_trigger_pct'),
+                sl_limit_pct=strategy.get('sl_limit_pct'),
+                use_target_order=strategy.get('use_target_order', False),
+                target_trigger_pct=strategy.get('target_trigger_pct')
             )
     
     if not result.get('success'):
