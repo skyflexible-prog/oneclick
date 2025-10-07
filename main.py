@@ -170,6 +170,32 @@ def register_handlers():
         allow_reentry=True
     )
     ptb.add_handler(strategy_conv_handler)
+
+    # ==================== TRADE CONVERSATION HANDLER ====================
+    
+    trade_conv_handler = ConversationHandler(
+        entry_points=[
+            CallbackQueryHandler(trade_menu, pattern="^trade$")
+        ],
+        states={
+            SELECTING_API: [
+                CallbackQueryHandler(select_api_for_trade, pattern="^trade_api_")
+            ],
+            SELECTING_STRATEGY: [
+                CallbackQueryHandler(execute_trade_preview, pattern="^execute_")
+            ],
+            CONFIRMING_TRADE: [
+                CallbackQueryHandler(confirm_trade_execution, pattern="^confirm_trade")
+            ],
+        },
+        fallbacks=[
+            CallbackQueryHandler(cancel_conversation, pattern="^main_menu$"),
+            CommandHandler("cancel", cancel_conversation)
+        ],
+        per_message=False,
+        allow_reentry=True
+    )
+    ptb.add_handler(trade_conv_handler)
     
     # SPECIFIC callback handlers BEFORE generic ones
     # These must be registered before the generic button_callback
