@@ -152,72 +152,79 @@ Need help? Contact support or check documentation.
 
 
 async def balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /balance command"""
+    """Show wallet balance for ALL APIs"""
     user = update.effective_user
+    
+    await update.message.reply_text("🔄 Fetching balances from all APIs...")
+    
     db = Database.get_database()
-    
-    # Get user and active API
     user_data = await crud.get_user_by_telegram_id(db, user.id)
+    
     if not user_data:
-        await update.message.reply_text("Please use /start first to register.")
-        return
-    
-    apis = await crud.get_user_api_credentials(db, user_data['_id'])
-    active_api = next((api for api in apis if api['is_active']), None)
-    
-    if not active_api:
         await update.message.reply_text(
-            "❌ No active API found. Please add and select an API first.",
-            reply_markup=get_api_management_keyboard()
-        )
-        return
-    
-    # Decrypt API credentials
-    api_key = encryptor.decrypt(active_api['api_key_encrypted'])
-    api_secret = encryptor.decrypt(active_api['api_secret_encrypted'])
-    
-    # Fetch balance from Delta Exchange
-    async with DeltaExchangeAPI(api_key, api_secret) as api:
-        balance_data = await api.get_wallet_balance()
-    
-    if 'error' in balance_data:
-        await update.message.reply_text(
-            f"❌ Error fetching balance: {balance_data.get('error')}",
+            "❌ User not found. Please use /start first.",
             reply_markup=get_main_menu_keyboard()
         )
         return
     
-    # Parse balance data
-    balance_text = f"<b>💰 Wallet Balance - {active_api['nickname']}</b>\n\n"
+    # Get all API credentials for this user
+    apis = await crud.get_user_apis(db, user_data['_id'])
     
-    if 'result' in balance_data:
-        for wallet in balance_data['result']:
-            asset = wallet.get('asset_symbol', 'Unknown')
-            balance = float(wallet.get('balance', 0))
-            available = float(wallet.get('available_balance', 0))
+    if not apis:
+        await update.message.reply_text(
+            "❌ No API credentials found.\n\n"
+            "Please add your Delta Exchange API credentials first.",
+            reply_markup=get_main_menu_keyboard()
+        )
+        return
+    
+    # ✅ Fetch balance from each API
+    balance_text = "💰 <b>Account Balances</b>\n\n"
+    total_balance = 0
+    total_available = 0
+    
+    for idx, api in enumerate(apis, 1):
+        try:
+            # Decrypt credentials
+            api_key = encryptor.decrypt(api['api_key_encrypted'])
+            api_secret = encryptor.decrypt(api['api_secret_encrypted'])
             
-            if asset == 'INR':
-                balance_text += f"<b>Asset:</b> {asset}\n"
-                balance_text += f"<b>Total Balance:</b> {format_currency(balance)}\n"
-                balance_text += f"<b>Available:</b> {format_currency(available)}\n"
-                balance_text += f"<b>In Use:</b> {format_currency(balance - available)}\n"
-    else:
-        balance_text += "No balance data available."
+            # Get balance
+            async with DeltaExchangeAPI(api_key, api_secret) as delta_api:
+                balance = await delta_api.get_wallet_balance()
+            
+            available = float(balance.get('available_balance', 0))
+            wallet = float(balance.get('balance', 0))
+            total_balance += wallet
+            total_available += available
+            
+            balance_text += (
+                f"<b>{idx}. {api.get('nickname', 'Unnamed API')}</b>\n"
+                f"   💵 Total: <b>${wallet:,.2f}</b>\n"
+                f"   ✅ Available: <b>${available:,.2f}</b>\n"
+                f"   🔒 In Use: ${(wallet - available):,.2f}\n\n"
+            )
+            
+        except Exception as e:
+            balance_text += (
+                f"<b>{idx}. {api.get('nickname', 'Unnamed API')}</b>\n"
+                f"   ❌ Error: {str(e)[:50]}\n\n"
+            )
     
-    if update.callback_query:
-        await update.callback_query.answer()
-        await update.callback_query.edit_message_text(
-            balance_text,
-            parse_mode=ParseMode.HTML,
-            reply_markup=get_main_menu_keyboard()
+    # Add totals
+    if total_balance > 0:
+        balance_text += (
+            f"<b>📊 TOTAL ACROSS ALL ACCOUNTS</b>\n"
+            f"💵 Total: <b>${total_balance:,.2f}</b>\n"
+            f"✅ Available: <b>${total_available:,.2f}</b>\n"
+            f"🔒 In Use: ${(total_balance - total_available):,.2f}"
         )
-    else:
-        await update.message.reply_text(
-            balance_text,
-            parse_mode=ParseMode.HTML,
-            reply_markup=get_main_menu_keyboard()
-        )
-
+    
+    await update.message.reply_text(
+        balance_text,
+        parse_mode=ParseMode.HTML,
+        reply_markup=get_main_menu_keyboard()
+    )
 
 # ==================== API MANAGEMENT HANDLERS ====================
 
