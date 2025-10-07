@@ -123,83 +123,75 @@ def register_handlers():
             AWAITING_API_SECRET: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_api_secret)]
         },
         fallbacks=[CallbackQueryHandler(cancel_conversation, pattern="^main_menu$")],
-        allow_reentry=True,
-        per_message=True
+        allow_reentry=True
     )
     ptb.add_handler(api_conv_handler)
     
-    # Strategy Creation Conversation Handler - FIXED VERSION
+    # Strategy Creation Conversation Handler
     strategy_conv_handler = ConversationHandler(
         entry_points=[CallbackQueryHandler(create_strategy_start, pattern="^create_strategy$")],
         states={
             AWAITING_STRATEGY_NAME: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_strategy_name),
-                CallbackQueryHandler(cancel_conversation, pattern="^main_menu$")
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_strategy_name)
             ],
             AWAITING_LOT_SIZE: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_lot_size),
-                CallbackQueryHandler(cancel_conversation, pattern="^main_menu$")
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_lot_size)
             ],
             AWAITING_STOP_LOSS: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_stop_loss),
-                CallbackQueryHandler(cancel_conversation, pattern="^main_menu$")
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_stop_loss)
             ],
             AWAITING_TARGET: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_target),
-                CallbackQueryHandler(cancel_conversation, pattern="^main_menu$")
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_target)
             ],
             AWAITING_MAX_CAPITAL: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_max_capital),
-                CallbackQueryHandler(cancel_conversation, pattern="^main_menu$")
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_max_capital)
             ],
             AWAITING_STRIKE_OFFSET: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_strike_offset),
-                CallbackQueryHandler(cancel_conversation, pattern="^main_menu$")
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_strike_offset)
             ]
         },
         fallbacks=[
-            CallbackQueryHandler(cancel_conversation, pattern="^main_menu$"),
+            CallbackQueryHandler(cancel_conversation, pattern="^cancel$"),
             CommandHandler("cancel", cancel_conversation)
         ],
-        allow_reentry=True,
-        per_message=True,
-        per_chat=True,
-        per_user=True
+        allow_reentry=True
     )
     ptb.add_handler(strategy_conv_handler)
     
-    # Callback query handlers for buttons (underlying, direction, expiry)
+    # SPECIFIC callback handlers BEFORE generic ones
+    # These must be registered before the generic button_callback
+    
+    # Strategy flow buttons
     ptb.add_handler(CallbackQueryHandler(receive_underlying, pattern="^underlying_"))
     ptb.add_handler(CallbackQueryHandler(receive_direction, pattern="^direction_"))
     ptb.add_handler(CallbackQueryHandler(receive_expiry, pattern="^expiry_"))
     
-    # Other callback handlers
-    ptb.add_handler(CallbackQueryHandler(button_callback, pattern="^main_menu$"))
-    ptb.add_handler(CallbackQueryHandler(button_callback, pattern="^help$"))
-    ptb.add_handler(CallbackQueryHandler(button_callback, pattern="^balance$"))
-    ptb.add_handler(CallbackQueryHandler(button_callback, pattern="^api_menu$"))
+    # API management
     ptb.add_handler(CallbackQueryHandler(list_apis, pattern="^list_apis$"))
-    ptb.add_handler(CallbackQueryHandler(button_callback, pattern="^view_api_"))
-    ptb.add_handler(CallbackQueryHandler(button_callback, pattern="^activate_api_"))
-    ptb.add_handler(CallbackQueryHandler(button_callback, pattern="^delete_api_"))
+    ptb.add_handler(CallbackQueryHandler(view_api_details, pattern="^view_api_"))
+    ptb.add_handler(CallbackQueryHandler(activate_api, pattern="^activate_api_"))
+    ptb.add_handler(CallbackQueryHandler(delete_api, pattern="^delete_api_"))
     
-    ptb.add_handler(CallbackQueryHandler(button_callback, pattern="^strategy_menu$"))
+    # Strategy management
     ptb.add_handler(CallbackQueryHandler(list_strategies, pattern="^list_strategies$"))
-    ptb.add_handler(CallbackQueryHandler(button_callback, pattern="^view_strategy_"))
-    ptb.add_handler(CallbackQueryHandler(button_callback, pattern="^delete_strategy_"))
+    ptb.add_handler(CallbackQueryHandler(view_strategy_details, pattern="^view_strategy_"))
+    ptb.add_handler(CallbackQueryHandler(delete_strategy, pattern="^delete_strategy_"))
     
+    # Trade execution
     ptb.add_handler(CallbackQueryHandler(trade_menu, pattern="^trade$"))
     ptb.add_handler(CallbackQueryHandler(execute_trade_preview, pattern="^execute_"))
     ptb.add_handler(CallbackQueryHandler(confirm_trade_execution, pattern="^confirm_trade_"))
     
+    # Position management
     ptb.add_handler(CallbackQueryHandler(show_positions, pattern="^positions$"))
     ptb.add_handler(CallbackQueryHandler(view_position_details, pattern="^view_position_"))
     ptb.add_handler(CallbackQueryHandler(close_position_confirm, pattern="^close_position_"))
     ptb.add_handler(CallbackQueryHandler(close_position_execute, pattern="^confirm_close_"))
     
+    # History
     ptb.add_handler(CallbackQueryHandler(show_history, pattern="^history$"))
     
-    # Generic callback handler (must be last)
+    # Generic callback handlers (LAST - catches everything else)
     ptb.add_handler(CallbackQueryHandler(button_callback))
     
     # Error handler
@@ -207,7 +199,7 @@ def register_handlers():
     
     bot_logger.info("All handlers registered successfully")
 
-
+            
 @app.post("/webhook")
 async def process_update(request: Request):
     """Process incoming Telegram updates via webhook"""
