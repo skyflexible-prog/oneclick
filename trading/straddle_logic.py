@@ -51,43 +51,33 @@ class StraddleCalculator:
     async def get_option_chain(self, underlying: str, expiry_type: str) -> List[Dict]:
         """
         Get option chain from Delta Exchange
-        For 'daily', gets soonest expiring options (today/tomorrow)
+        Filters based on expiry_type from strategy settings
         """
         try:
-            from datetime import datetime, timedelta
-        
-            # Calculate expiry date based on expiry_type
-            expiry_date = self._get_expiry_date(expiry_type)
-        
-            # Build option chain endpoint
+            # Build products endpoint
             params = {
+                'states': 'live',  # Only active contracts
                 'contract_types': 'call_options,put_options',
                 'underlying_asset_symbols': underlying.upper()
             }
         
-            # Add expiry date filter if specific date provided
-            if expiry_date:
-                params['expiry_date'] = expiry_date
-                trade_logger.info(f"Fetching option chain: {underlying}, expiry: {expiry_date}")
-            else:
-                trade_logger.info(f"Fetching option chain: {underlying}, expiry: {expiry_type} (will filter)")
+            trade_logger.info(f"Fetching option chain: {underlying}, expiry type: {expiry_type}")
         
             # Make request
-            response = await self.api._make_request('GET', '/v2/tickers', params=params)
+            response = await self.api._make_request('GET', '/v2/products', params=params)
         
             if not response or 'result' not in response:
                 trade_logger.error(f"Invalid response from option chain: {response}")
                 return []
         
             options = response['result']
-            trade_logger.info(f"Fetched {len(options)} options for {underlying}")
+            trade_logger.info(f"Fetched {len(options)} LIVE options for {underlying}")
         
-            # For daily expiry, filter to get soonest expiring
-            if expiry_type.lower() == 'daily':
-                options = self._filter_soonest_expiring(options)
-                trade_logger.info(f"After filtering for soonest expiry: {len(options)} options")
+            # Filter by expiry type
+            filtered_options = self._filter_by_expiry_type(options, expiry_type)
+            trade_logger.info(f"After filtering for {expiry_type} expiry: {len(filtered_options)} options")
         
-            return options
+            return filtered_options
         
         except Exception as e:
             trade_logger.error(f"Error fetching option chain: {e}", exc_info=True)
