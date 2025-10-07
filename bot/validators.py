@@ -92,23 +92,31 @@ class InputValidator:
     
     @staticmethod
     def validate_capital(capital_str: str) -> Tuple[bool, str, Optional[float]]:
-        """Validate capital/amount input"""
+        """
+        Validate capital/amount input
+        Allows 0 for unlimited capital
+        """
         try:
             capital = float(capital_str.strip())
-            
-            if capital <= 0:
-                return False, "Capital must be greater than 0", None
-            
+        
+            # ✅ Allow 0 for unlimited capital
+            if capital == 0:
+                return True, "Valid", 0.0
+        
+            # For non-zero values, apply normal validation
+            if capital < 0:
+                return False, "Capital must be 0 or greater", None
+        
             if capital < 1000:
-                return False, "Minimum capital is ₹1000", None
-            
+                return False, "Minimum capital is ₹1,000 (or 0 for unlimited)", None
+        
             if capital > 10000000:  # 1 crore
                 return False, "Capital seems too large", None
-            
-            return True, "Valid", capital
         
+            return True, "Valid", capital
+    
         except ValueError:
-            return False, "Capital must be a number", None
+            return False, "Capital must be a number or 0 for unlimited", None
     
     @staticmethod
     def validate_strike_offset(offset_str: str) -> Tuple[bool, str, Optional[int]]:
