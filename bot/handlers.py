@@ -1075,10 +1075,12 @@ async def confirm_trade_execution(update: Update, context: ContextTypes.DEFAULT_
                 strategy['lot_size']
             )
         else:
+            # FIXED: Added stop_loss_pct parameter
             result = await executor.execute_short_straddle(
                 preview['call_symbol'],
                 preview['put_symbol'],
-                strategy['lot_size']
+                strategy['lot_size'],
+                stop_loss_pct=strategy['stop_loss_pct']  # ← ADD THIS LINE
             )
     
     if not result.get('success'):
@@ -1134,6 +1136,7 @@ async def confirm_trade_execution(update: Update, context: ContextTypes.DEFAULT_
     }
     await crud.create_order(db, put_order_data)
     
+    # FIXED: Changed ₹ to $
     success_text = f"""
 ✅ <b>Trade Executed Successfully!</b>
 
@@ -1142,11 +1145,11 @@ async def confirm_trade_execution(update: Update, context: ContextTypes.DEFAULT_
 <b>Call Order:</b> {result['call_order']['id']}
 <b>Put Order:</b> {result['put_order']['id']}
 
-<b>Entry Premium:</b> {format_currency(preview['total_premium'])}
-<b>Total Cost:</b> {format_currency(preview['total_cost'])}
+<b>Entry Premium:</b> ${preview['total_premium']:.2f}
+<b>Total Cost:</b> ${preview['total_cost']:.2f}
 
-<b>Stop Loss:</b> {format_currency(preview['targets']['stop_loss'])}
-{f"<b>Target:</b> {format_currency(preview['targets'].get('target', 0))}" if preview['targets'].get('target') else ""}
+<b>Stop Loss:</b> ${preview['targets']['stop_loss']:.2f}
+{f"<b>Target:</b> ${preview['targets'].get('target', 0):.2f}" if preview['targets'].get('target') else ""}
 
 Your position is now being monitored. You'll receive alerts when SL/Target is hit.
 
@@ -1162,9 +1165,7 @@ View positions: /positions
     # Start position monitoring
     # This will be implemented in the main.py file
     clear_user_session(user.id)
-
-# Continue in next part...
-
+    
 # ==================== POSITION MANAGEMENT HANDLERS ====================
 
 async def show_positions(update: Update, context: ContextTypes.DEFAULT_TYPE):
