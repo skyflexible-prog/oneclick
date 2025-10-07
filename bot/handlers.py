@@ -1197,24 +1197,8 @@ async def show_positions(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # Fetch live positions
         async with DeltaExchangeAPI(api_key, api_secret) as api:
-            call_pos = await api.get_position_by_symbol(trade['call_symbol'])  # ← NEW
-            put_pos = await api.get_position_by_symbol(trade['put_symbol'])    # ← NEW
-    
-            # Calculate total P&L
-            total_pnl = 0
-            if call_pos:
-                total_pnl += float(call_pos.get('unrealized_pnl', 0))
-            if put_pos:
-                total_pnl += float(put_pos.get('unrealized_pnl', 0))
-            
-            for position in all_positions:
-                product = position.get('product', {})
-                symbol = product.get('symbol', '')
-                
-                if symbol == trade['call_symbol']:
-                    call_pos = position
-                elif symbol == trade['put_symbol']:
-                    put_pos = position
+            call_pos = await api.get_position_by_symbol(trade['call_symbol'])
+            put_pos = await api.get_position_by_symbol(trade['put_symbol'])
             
             # Calculate total P&L
             total_pnl = 0
@@ -1234,7 +1218,7 @@ async def show_positions(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 'call_symbol': trade['call_symbol'],
                 'put_symbol': trade['put_symbol'],
                 'pnl': total_pnl,
-                'entry_time': trade['entry_time']
+                'entry_time': trade.get('entry_time', 'N/A')
             })
     
     await update.callback_query.answer()
