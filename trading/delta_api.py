@@ -40,16 +40,32 @@ class DeltaExchangeAPI:
         
         return signature, timestamp
     
-    def _get_headers(self, method: str, endpoint: str, query_string: str = "", body: str = "") -> Dict:
-        """Generate request headers with authentication"""
-        signature, timestamp = self._generate_signature(method, endpoint, query_string, body)
-        
+    def _get_headers(self, method: str, endpoint: str, query_string: str, body: str) -> Dict[str, str]:
+        """Generate request headers with signature"""
+        timestamp = str(int(time.time()))
+    
+        # Build signature data
+        # Format: METHOD + timestamp + endpoint + ? + query_string + body
+        signature_data = method + timestamp + endpoint
+    
+        if query_string:
+            signature_data += "?" + query_string
+    
+        signature_data += body
+    
+        # Generate signature
+        signature = hmac.new(
+            self.api_secret.encode('utf-8'),
+            signature_data.encode('utf-8'),
+            hashlib.sha256
+        ).hexdigest()
+    
         return {
             'api-key': self.api_key,
-            'signature': signature,
             'timestamp': timestamp,
-            'User-Agent': 'StraddleBot/1.0',
-            'Content-Type': 'application/json'
+            'signature': signature,
+            'Content-Type': 'application/json',
+            'User-Agent': 'python-rest-client'
         }
     
     async def _make_request(
