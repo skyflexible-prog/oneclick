@@ -361,3 +361,68 @@ class DeltaExchangeAPI:
             api_logger.error(f"Error checking margin: {e}")
             return {"sufficient": False, "error": str(e)}
                                     
+    async def place_stop_limit_order(
+        self,
+        product_symbol: str,
+        side: str,  # 'buy' or 'sell'
+        size: int,
+        stop_price: str,  # Trigger price
+        limit_price: str,  # Execution price
+        reduce_only: bool = True  # True for stop-loss
+    ) -> Dict:
+        """
+        Place stop-limit order for stop-loss protection
+    
+        Args:
+            product_symbol: Option symbol (e.g., 'C-BTC-123600-081025')
+            side: 'buy' for closing short, 'sell' for closing long
+            size: Number of contracts
+            stop_price: Price at which order is triggered
+            limit_price: Maximum/minimum price to execute
+            reduce_only: True to only close positions (recommended for SL)
+    
+        Returns:
+            API response with order details
+        """
+        try:
+            # Get product ID from symbol
+            product_response = await self._make_request('GET', f'/v2/products')
+        
+            if 'result' not in product_response:
+                return {'error': 'Failed to fetch products'}
+        
+            product_id = None
+            for product in product_response['result']:
+                if product.get('symbol') == product_symbol:
+                    product_id = product.get('id')
+                    break
+            
+            if not product_id:
+                return {'error': f'Product not found: {product_symbol}'}
+        
+            # Place stop-limit order
+            order_data = {
+                'product_id': product_id,
+                'size': size,
+                'side': side,
+                'order_type': 'limit_order',  # Limit order
+                'limit_price': limit_price,
+                'stop_order_type': 'stop_loss_order',  # Stop-loss type
+                'stop_price': stop_price,  # Trigger price
+                'reduce_only': reduce_only,  # Only close position
+                'time_in_force': 'gtc'  # Good-till-cancel
+            }
+        
+            response = await self._make_request('POST', '/v2/orders', data=order_data)
+        
+            if 'result' in response:
+                api_logger.info(f"Stop-loss order placed: {product_symbol} @ stop={stop_price}, limit={limit_price}")
+                return response
+            else:
+                api_logger.error(f"Failed to place stop-loss: {response}")
+                return response
+        
+        except Exception as e:
+            api_logger.error(f"Error placing stop-loss order: {e}", exc_info=True)
+            return {'error': str(e)}
+                        
