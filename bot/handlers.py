@@ -1200,6 +1200,13 @@ async def show_positions(update: Update, context: ContextTypes.DEFAULT_TYPE):
             call_pos = await api.get_position_by_symbol(trade['call_symbol'])
             put_pos = await api.get_position_by_symbol(trade['put_symbol'])
             
+            # Skip if NEITHER position exists (position expired/closed)
+            if not call_pos and not put_pos:
+                api_logger.info(f"Position {trade['_id']} has no live data - likely expired")
+                # Mark as closed in database
+                await crud.update_trade_status(db, trade['_id'], 'closed')
+                continue
+            
             # Calculate total P&L
             total_pnl = 0
             
@@ -1220,6 +1227,18 @@ async def show_positions(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 'pnl': total_pnl,
                 'entry_time': trade.get('entry_time', 'N/A')
             })
+    
+    # Check if any LIVE positions found
+    if not positions_with_pnl:
+        await update.callback_query.answer()
+        await update.callback_query.edit_message_text(
+            "📈 <b>Open Positions</b>\n\n"
+            "You have no open positions at the moment.\n\n"
+            "<i>Note: Previous positions may have expired.</i>",
+            parse_mode=ParseMode.HTML,
+            reply_markup=get_main_menu_keyboard()
+        )
+        return
     
     await update.callback_query.answer()
     await update.callback_query.edit_message_text(
