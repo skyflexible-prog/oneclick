@@ -1778,62 +1778,82 @@ View trade history: /history
 # ==================== HISTORY HANDLER ====================
 
 async def show_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show trade history"""
-    user = update.effective_user
+    """Show trade history across ALL APIs"""
+    query = update.callback_query
+    await query.answer()
+    
+    user = query.from_user
+    
     db = Database.get_database()
-    
     user_data = await crud.get_user_by_telegram_id(db, user.id)
-    closed_trades = await crud.get_user_trades(db, user_data['_id'], status='closed')
     
-    if not closed_trades:
-        await update.callback_query.answer()
-        await update.callback_query.edit_message_text(
+    if not user_data:
+        await query.edit_message_text(
+            "❌ User not found.",
+            reply_markup=get_main_menu_keyboard()
+        )
+        return
+    
+    # Get all closed trades for this user (across all APIs)
+    trades = await db.trades.find({
+        'user_id': user_data['_id'],
+        'status': 'closed'
+    }).sort('exit_time', -1).limit(20).to_list(20)
+    
+    if not trades:
+        await query.edit_message_text(
             "📜 <b>Trade History</b>\n\n"
-            "No trade history available.",
+            "No closed trades found.",
             parse_mode=ParseMode.HTML,
             reply_markup=get_main_menu_keyboard()
         )
         return
     
-    # Calculate statistics
-    total_trades = len(closed_trades)
-    winning_trades = len([t for t in closed_trades if t['pnl'] > 0])
-    losing_trades = len([t for t in closed_trades if t['pnl'] < 0])
-    total_pnl = sum(t['pnl'] for t in closed_trades)
-    win_rate = (winning_trades / total_trades * 100) if total_trades > 0 else 0
+    # ✅ Get API info for each trade
+    api_cache = {}
     
-    history_text = f"""
-<b>📜 Trade History</b>
-
-<b>📊 Statistics:</b>
-<b>Total Trades:</b> {total_trades}
-<b>Winning Trades:</b> 🟢 {winning_trades}
-<b>Losing Trades:</b> 🔴 {losing_trades}
-<b>Win Rate:</b> {format_percentage(win_rate)}
-<b>Net P&L:</b> {format_currency(total_pnl)}
-
-<b>Recent Trades:</b>
-"""
+    history_text = "📜 <b>Trade History (Last 20)</b>\n\n"
     
-    # Show last 5 trades
-    for trade in closed_trades[:5]:
-        strategy = await crud.get_strategy_by_id(db, trade['strategy_id'])
-        pnl_emoji = "🟢" if trade['pnl'] >= 0 else "🔴"
+    for idx, trade in enumerate(trades, 1):
+        # Get API nickname
+        api_id = str(trade['api_id'])
+        if api_id not in api_cache:
+            api_data = await crud.get_api_credential_by_id(db, trade['api_id'])
+            api_cache[api_id] = api_data.get('nickname', 'Unknown API') if api_data else 'Unknown API'
         
-        history_text += f"\n{pnl_emoji} <b>{strategy['name']}</b>\n"
-        history_text += f"   P&L: {format_currency(trade['pnl'])}\n"
-        history_text += f"   Date: {trade['entry_time'].strftime('%Y-%m-%d')}\n"
+        api_nickname = api_cache[api_id]
+        
+        # Calculate P&L
+        pnl = trade.get('pnl', 0)
+        pnl_emoji = "🟢" if pnl > 0 else "🔴" if pnl < 0 else "⚪"
+        
+        # Format entry and exit times
+        entry_time = trade['entry_time'].strftime('%d %b, %H:%M')
+        exit_time = trade.get('exit_time')
+        exit_time_str = exit_time.strftime('%d %b, %H:%M') if exit_time else 'N/A'
+        
+        history_text += (
+            f"{idx}. {pnl_emoji} <b>{api_nickname}</b>\n"
+            f"   Symbols: {trade['call_symbol']}, {trade['put_symbol']}\n"
+            f"   Entry: {entry_time}\n"
+            f"   Exit: {exit_time_str}\n"
+            f"   P&L: <b>${pnl:,.2f}</b>\n\n"
+        )
     
-    if total_trades > 5:
-        history_text += f"\n<i>... and {total_trades - 5} more trades</i>"
+    # Calculate total P&L
+    total_pnl = sum(t.get('pnl', 0) for t in trades)
+    total_emoji = "🟢" if total_pnl > 0 else "🔴" if total_pnl < 0 else "⚪"
     
-    await update.callback_query.answer()
-    await update.callback_query.edit_message_text(
+    history_text += (
+        f"<b>📊 Summary (Last 20 Trades)</b>\n"
+        f"{total_emoji} Total P&L: <b>${total_pnl:,.2f}</b>"
+    )
+    
+    await query.edit_message_text(
         history_text,
         parse_mode=ParseMode.HTML,
         reply_markup=get_main_menu_keyboard()
     )
-
 
 # ==================== CONVERSATION CANCEL HANDLER ====================
 
