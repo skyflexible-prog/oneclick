@@ -260,23 +260,28 @@ class DeltaExchangeAPI:
     
     async def get_positions(self) -> List[Dict]:
         """
-        Get all open positions
+        Get all open positions for BTC and ETH
     
         Returns:
             List of position dictionaries
         """
         try:
-            # Get all positions (no parameters)
-            response = await self._make_request('GET', '/v2/positions')
+            all_positions = []
         
-            if 'result' not in response:
-                api_logger.error(f"Failed to fetch positions: {response}")
-                return []
+            # Fetch positions for BTC
+            btc_params = {'underlying_asset_symbol': 'BTC'}
+            btc_response = await self._make_request('GET', '/v2/positions', params=btc_params)
+            if 'result' in btc_response:
+                all_positions.extend(btc_response['result'])
         
-            positions = response['result']
-            api_logger.info(f"Fetched {len(positions)} positions")
+            # Fetch positions for ETH
+            eth_params = {'underlying_asset_symbol': 'ETH'}
+            eth_response = await self._make_request('GET', '/v2/positions', params=eth_params)
+            if 'result' in eth_response:
+                all_positions.extend(eth_response['result'])
         
-            return positions
+            api_logger.info(f"Fetched {len(all_positions)} positions (BTC + ETH)")
+            return all_positions
     
         except Exception as e:
             api_logger.error(f"Error getting positions: {e}", exc_info=True)
