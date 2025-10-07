@@ -533,8 +533,6 @@ async def receive_strategy_name(update: Update, context: ContextTypes.DEFAULT_TY
         parse_mode=ParseMode.HTML,
         reply_markup=get_underlying_keyboard()
     )
-    
-    return ConversationHandler.END  # Will be handled by callback
 
 
 async def receive_underlying(update: Update, context: ContextTypes.DEFAULT_TYPE):
