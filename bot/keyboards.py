@@ -46,6 +46,28 @@ def get_api_list_keyboard(apis: List[Dict]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(keyboard)
 
 
+def get_api_selection_keyboard(apis: List[Dict]) -> InlineKeyboardMarkup:
+    """Keyboard for selecting API during trade execution"""
+    keyboard = []
+    
+    for api in apis:
+        nickname = api.get('nickname', 'Unnamed API')
+        status_emoji = "✅" if api.get('is_active') else "⚪"
+        
+        keyboard.append([
+            InlineKeyboardButton(
+                f"{status_emoji} {nickname}",
+                callback_data=f"trade_api_{api['_id']}"
+            )
+        ])
+    
+    keyboard.append([
+        InlineKeyboardButton("🔙 Cancel", callback_data="main_menu")
+    ])
+    
+    return InlineKeyboardMarkup(keyboard)
+    
+
 def get_api_action_keyboard(api_id: str) -> InlineKeyboardMarkup:
     """Actions for specific API"""
     keyboard = [
