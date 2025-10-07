@@ -138,35 +138,34 @@ class DeltaExchangeAPI:
     async def get_spot_price(self, underlying: str) -> Optional[float]:
         """Get current spot price for underlying (BTC, ETH)"""
         try:
-            # Delta Exchange India index symbol format
-            if underlying.upper() == "BTC":
-                symbol = ".DEXBTUSD"  # BTC spot index
-            elif underlying.upper() == "ETH":
-                symbol = ".DEETHUSD"  # ETH spot index (verify this)
-            else:
-                api_logger.error(f"Unsupported underlying: {underlying}")
-                return None
+            # Get all indices
+            response = await self._make_request('GET', '/v2/indices')
         
-            # Get ticker data
-            response = await self.get_tickers(symbol)
-        
-            if 'result' in response and response['result']:
-                # Try multiple price fields in order of preference
-                result = response['result']
+            if 'result' in response:
+                # Find the index for our underlying
+                if underlying.upper() == "BTC":
+                    index_symbol = ".DEXBTUSD"
+                elif underlying.upper() == "ETH":
+                    index_symbol = ".DEETHUSD"
+                else:
+                    return None
             
-                # Check for mark_price first, then close, then spot_price
-                if 'mark_price' in result and result['mark_price']:
-                    return float(result['mark_price'])
-                elif 'close' in result and result['close']:
-                    return float(result['close'])
-                elif 'spot_price' in result and result['spot_price']:
-                    return float(result['spot_price'])
+                # Now get ticker for this index
+                ticker_response = await self._make_request('GET', f'/v2/tickers/{index_symbol}')
+            
+                if 'result' in ticker_response:
+                    result = ticker_response['result']
+                
+                    # Get the close price (current index price)
+                    if 'close' in result:
+                        return float(result['close'])
+                    elif 'mark_price' in result:
+                        return float(result['mark_price'])
         
-            api_logger.error(f"No price data in response for {symbol}")
             return None
         
         except Exception as e:
-            api_logger.error(f"Error fetching spot price for {underlying}: {e}")
+            api_logger.error(f"Error fetching spot price: {e}")
             return None
     
     async def get_option_chain(self, underlying: str, expiry_date: str = None) -> List[Dict]:
