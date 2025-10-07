@@ -250,28 +250,28 @@ class DeltaExchangeAPI:
         return await self._make_request('GET', '/v2/wallet/balances')
     
     async def get_positions(self) -> List[Dict]:
-    """
-    Get all open positions
+        """
+        Get all open positions
     
-    Returns:
-        List of position dictionaries
-    """
-    try:
-        # Get all positions (no parameters)
-        response = await self._make_request('GET', '/v2/positions')
+        Returns:
+            List of position dictionaries
+        """
+        try:
+            # Get all positions (no parameters)
+            response = await self._make_request('GET', '/v2/positions')
         
-        if 'result' not in response:
-            api_logger.error(f"Failed to fetch positions: {response}")
+            if 'result' not in response:
+                api_logger.error(f"Failed to fetch positions: {response}")
+                return []
+        
+            positions = response['result']
+            api_logger.info(f"Fetched {len(positions)} positions")
+        
+            return positions
+    
+        except Exception as e:
+            api_logger.error(f"Error getting positions: {e}", exc_info=True)
             return []
-        
-        positions = response['result']
-        api_logger.info(f"Fetched {len(positions)} positions")
-        
-        return positions
-    
-    except Exception as e:
-        api_logger.error(f"Error getting positions: {e}", exc_info=True)
-        return []
 
 
     async def get_position_by_symbol(self, symbol: str) -> Optional[Dict]:
