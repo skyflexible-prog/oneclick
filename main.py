@@ -167,9 +167,9 @@ def register_handlers():
     # These must be registered before the generic button_callback
     
     # Strategy flow buttons
-    ptb.add_handler(CallbackQueryHandler(receive_underlying, pattern="^underlying_"))
-    ptb.add_handler(CallbackQueryHandler(receive_direction, pattern="^direction_"))
-    ptb.add_handler(CallbackQueryHandler(receive_expiry, pattern="^expiry_"))
+    #ptb.add_handler(CallbackQueryHandler(receive_underlying, pattern="^underlying_"))
+    #ptb.add_handler(CallbackQueryHandler(receive_direction, pattern="^direction_"))
+    #ptb.add_handler(CallbackQueryHandler(receive_expiry, pattern="^expiry_"))
     
     # API management
     ptb.add_handler(CallbackQueryHandler(list_apis, pattern="^list_apis$"))
