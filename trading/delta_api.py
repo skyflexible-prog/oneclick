@@ -69,90 +69,99 @@ class DeltaExchangeAPI:
         }
     
     async def _make_request(
-        self,
-        method: str,
-        endpoint: str,
-        params: Dict = None,
-        data: Dict = None,
-        retry_count: int = 0
-    ) -> Dict:
-        """Make authenticated API request with retry logic"""
-        if not self.session:
-            self.session = aiohttp.ClientSession()
+            self,
+            method: str,
+            endpoint: str,
+            params: Dict = None,
+            data: Dict = None,
+            retry_count: int = 0
+        ) -> Dict:
+            """Make authenticated API request with retry logic"""
+            if not self.session:
+                self.session = aiohttp.ClientSession()
         
-        url = f"{self.base_url}{endpoint}"
+            url = f"{self.base_url}{endpoint}"
         
-        # Build query string for signature (sorted alphabetically)
-        query_string = ""
-        if params:
-            # Filter out None values and sort alphabetically
-            filtered_params = {k: v for k, v in params.items() if v is not None}
-            sorted_params = sorted(filtered_params.items())
-            query_string = "&".join([f"{k}={v}" for k, v in sorted_params])
+            # Build query string for signature (sorted alphabetically)
+            query_string = ""
+            if params:
+                # Filter out None values and sort alphabetically
+                filtered_params = {k: v for k, v in params.items() if v is not None}
+                sorted_params = sorted(filtered_params.items())
+                query_string = "&".join([f"{k}={v}" for k, v in sorted_params])
         
-        # Build body for signature
-        body = ""
-        if data:
-            import json
-            body = json.dumps(data)
-        
-        # Get headers with correct signature
-        headers = self._get_headers(method, endpoint, query_string, body)
-        
-        try:
-            async with self.session.request(
-                method=method,
-                url=url,
-                params=params,  # aiohttp will URL-encode these
-                json=data,
-                headers=headers,
-                timeout=aiohttp.ClientTimeout(total=settings.api_call_timeout)
-            ) as response:
-                # Handle different content types
-                content_type = response.headers.get('Content-Type', '')
+            # Build body for signature
+            body = ""
+            if data:
+                import json
+                body = json.dumps(data)
+            
+            # Get headers with correct signature
+            headers = self._get_headers(method, endpoint, query_string, body)
+            
+            try:
+                # Build request kwargs - only add params/data if they exist
+                request_kwargs = {
+                    'method': method,
+                    'url': url,
+                    'headers': headers,
+                    'timeout': aiohttp.ClientTimeout(total=settings.api_call_timeout)
+                }
+            
+                # Only add params if not None and not empty
+                if params:
+                    request_kwargs['params'] = params
+            
+                # Only add json data if not None
+                if data:
+                    request_kwargs['json'] = data
+            
+                async with self.session.request(**request_kwargs) as response:
+                    # Handle different content types
+                    content_type = response.headers.get('Content-Type', '')
                 
-                if 'application/json' in content_type:
-                    response_data = await response.json()
-                elif response.status == 200:
-                    # Some endpoints return empty body on success
-                    text = await response.text()
-                    if text.strip():
-                        try:
-                            response_data = await response.json()
-                        except:
-                            response_data = {'result': text}
+                    if 'application/json' in content_type:
+                        response_data = await response.json()
+                    elif response.status == 200:
+                        # Some endpoints return empty body on success
+                        text = await response.text()
+                        if text.strip():
+                            try:
+                                response_data = await response.json()
+                            except:
+                                response_data = {'result': text}
+                        else:
+                            response_data = {'result': 'success'}
                     else:
-                        response_data = {'result': 'success'}
-                else:
-                    text = await response.text()
-                    api_logger.error(f"Unexpected content type: {content_type}, body: {text}")
-                    return {"error": f"Unexpected content type: {content_type}", "body": text}
+                        text = await response.text()
+                        api_logger.error(f"Unexpected content type: {content_type}, body: {text}")
+                        return {"error": f"Unexpected content type: {content_type}", "body": text}
                 
-                if response.status == 200:
-                    api_logger.info(f"API call successful: {method} {endpoint}")
-                    return response_data
-                else:
-                    api_logger.error(f"API error: {response.status} - {response_data}")
+                    if response.status == 200:
+                        api_logger.info(f"API call successful: {method} {endpoint}")
+                        return response_data
+                    else:
+                        api_logger.error(f"API error: {response.status} - {response_data}")
                     
-                    # Retry on specific errors
-                    if retry_count < settings.max_retries and response.status in [429, 500, 502, 503]:
-                        wait_time = 2 ** retry_count  # Exponential backoff
-                        api_logger.info(f"Retrying after {wait_time}s...")
-                        await asyncio.sleep(wait_time)
-                        return await self._make_request(method, endpoint, params, data, retry_count + 1)
+                        # Retry on specific errors
+                        if retry_count < settings.max_retries and response.status in [429, 500, 502, 503]:
+                            wait_time = 2 ** retry_count  # Exponential backoff
+                            api_logger.info(f"Retrying after {wait_time}s...")
+                            await asyncio.sleep(wait_time)
+                            return await self._make_request(method, endpoint, params, data, retry_count + 1)
                     
-                    return {"error": response_data, "status": response.status}
+                        return {"error": response_data, "status": response.status}
         
-        except asyncio.TimeoutError:
-            api_logger.error(f"Request timeout: {method} {endpoint}")
-            if retry_count < settings.max_retries:
-                return await self._make_request(method, endpoint, params, data, retry_count + 1)
-            return {"error": "Request timeout"}
+            except asyncio.TimeoutError:
+                api_logger.error(f"Request timeout: {method} {endpoint}")
+                if retry_count < settings.max_retries:
+                    return await self._make_request(method, endpoint, params, data, retry_count + 1)
+                return {"error": "Request timeout"}
         
-        except Exception as e:
-            api_logger.error(f"Request exception: {str(e)}", exc_info=True)
-            return {"error": str(e)}
-    
+            except Exception as e:
+                api_logger.error(f"Request exception: {str(e)}", exc_info=True)
+                return {"error": str(e)}
+        
     # ==================== MARKET DATA ENDPOINTS ====================
     
     async def get_products(self, symbol: str = None) -> Dict:
