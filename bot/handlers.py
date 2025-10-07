@@ -914,7 +914,10 @@ async def receive_max_capital(update: Update, context: ContextTypes.DEFAULT_TYPE
     session['strategy_data']['max_capital'] = capital
     
     # ✅ Show "Unlimited" if capital is 0
-    capital_display = "<b>Unlimited</b>" if capital == 0 else f"<b>{format_currency(capital)}</b>"
+    if capital == 0:
+        capital_display = "<b>Unlimited</b>"
+    else:
+        capital_display = f"<b>{format_currency(capital)}</b>"
     
     await update.message.reply_text(
         f"✅ Max Capital: {capital_display}\n\n"
