@@ -24,6 +24,9 @@ from bot.handlers import (
     receive_api_key,
     receive_api_secret,
     list_apis,
+    view_api_details,        # ADD THIS
+    activate_api,            # ADD THIS
+    delete_api,
     create_strategy_start,
     receive_strategy_name,
     receive_underlying,
@@ -35,6 +38,8 @@ from bot.handlers import (
     receive_max_capital,
     receive_strike_offset,
     list_strategies,
+    view_strategy_details,   # ADD THIS if not there
+    delete_strategy,         # ADD THIS if not there
     trade_menu,
     execute_trade_preview,
     confirm_trade_execution,
