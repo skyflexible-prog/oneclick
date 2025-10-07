@@ -138,58 +138,49 @@ class DeltaExchangeAPI:
     async def get_spot_price(self, underlying: str) -> Optional[float]:
         """Get current spot price for underlying (BTC, ETH)"""
         try:
-            symbol_map = {
-                "BTC": ".DEXBTUSD",
-                "ETH": ".DEETHUSD"
+            # Use perpetual contract symbols (these return actual data)
+            contract_map = {
+                "BTC": "BTCUSD",
+                "ETH": "ETHUSD"
             }
         
-            symbol = symbol_map.get(underlying.upper())
-            if not symbol:
+            contract_symbol = contract_map.get(underlying.upper())
+            if not contract_symbol:
                 api_logger.error(f"Unsupported underlying: {underlying}")
                 return None
         
-            # Get ticker for index
-            api_logger.info(f"Fetching ticker for {symbol}")
-            response = await self._make_request('GET', f'/v2/tickers/{symbol}')
+            api_logger.info(f"Fetching spot price for {underlying} using {contract_symbol}")
         
-            # LOG THE FULL RESPONSE TO SEE STRUCTURE
-            api_logger.info(f"Full response for {symbol}: {response}")
+            # Get ticker for perpetual contract
+            response = await self._make_request('GET', f'/v2/tickers/{contract_symbol}')
         
-            if not response:
-                api_logger.error(f"Response is None for {symbol}")
+            if not response or not isinstance(response, dict):
+                api_logger.error(f"Invalid response: {response}")
                 return None
         
-            # Check response type
-            if not isinstance(response, dict):
-                api_logger.error(f"Response is not dict: {type(response)}")
+            if not response.get('success'):
+                api_logger.error(f"API error: {response}")
                 return None
         
-            # Navigate response structure
-            if 'result' in response:
-                result = response['result']
-                api_logger.info(f"Result structure: {result}")
-            
-                if isinstance(result, dict):
-                    # Try different price fields
-                    for field in ['close', 'mark_price', 'spot_price', 'price', 'last_price']:
-                        if field in result and result[field]:
-                            price = float(result[field])
-                            api_logger.info(f"Got {field} price: {price}")
-                            return price
-                elif isinstance(result, list) and len(result) > 0:
-                    # Response might be a list
-                    ticker = result[0]
-                    for field in ['close', 'mark_price', 'spot_price', 'price']:
-                        if field in ticker and ticker[field]:
-                            return float(ticker[field])
+            result = response.get('result')
+            if not result:
+                api_logger.error(f"No result for {contract_symbol}: {response}")
+                return None
         
-            api_logger.error(f"Could not extract price from response: {response}")
-            return None
+            # Get mark price from perpetual
+            mark_price = result.get('mark_price')
+            if not mark_price:
+                api_logger.error(f"No mark_price in result: {result}")
+                return None
+        
+            price = float(mark_price)
+            api_logger.info(f"✅ {underlying} spot price: ₹{price:,.2f}")
+            return price
         
         except Exception as e:
-            api_logger.error(f"Exception fetching spot price: {str(e)}", exc_info=True)
+            api_logger.error(f"Exception: {e}", exc_info=True)
             return None
-    
+
     async def get_option_chain(self, underlying: str, expiry_date: str = None) -> List[Dict]:
         """Get option chain for underlying"""
         try:
