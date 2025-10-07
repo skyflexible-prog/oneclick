@@ -967,6 +967,15 @@ async def execute_trade_preview(update: Update, context: ContextTypes.DEFAULT_TY
         
         # Check margin
         margin_check = await api.check_margin_requirements(call_contract['symbol'], strategy['lot_size'])
+        
+        # FIXED: Get available balance
+        balance_response = await api.get_wallet_balance()
+        available_balance = 0
+        if 'result' in balance_response:
+            for wallet in balance_response['result']:
+                if wallet.get('asset_symbol') == 'INR':
+                    available_balance = float(wallet.get('available_balance', 0))
+                    break
     
     # Store trade preview data in session
     session = get_user_session(user.id)
@@ -989,7 +998,7 @@ async def execute_trade_preview(update: Update, context: ContextTypes.DEFAULT_TY
     preview_text = f"""
 <b>📊 Trade Preview - {direction_text} Straddle</b>
 
-<b>🔑 Active API:</b> {active_api['nickname']}
+<b>🔑 Active API:</b> {api_data['nickname']}
 <b>💰 Available Balance:</b> ₹{available_balance:,.2f}
 
 <b>Strategy:</b> {strategy['name']}
@@ -997,27 +1006,27 @@ async def execute_trade_preview(update: Update, context: ContextTypes.DEFAULT_TY
 
 <b>🎯 Trade Details:</b>
 <b>Underlying:</b> {strategy['underlying']}
-<b>Spot Price:</b> {format_currency(spot_price)}
-<b>ATM Strike:</b> {format_currency(atm_strike)}
+<b>Spot Price:</b> ₹{spot_price:,.2f}
+<b>ATM Strike:</b> ₹{atm_strike:,.2f}
 
 <b>Call Option:</b> {call_contract['symbol']}
-<b>Call Premium:</b> {format_currency(call_premium)}
+<b>Call Premium:</b> ₹{call_premium:,.2f}
 
 <b>Put Option:</b> {put_contract['symbol']}
-<b>Put Premium:</b> {format_currency(put_premium)}
+<b>Put Premium:</b> ₹{put_premium:,.2f}
 
 <b>💰 Cost Analysis:</b>
-<b>Total Premium:</b> {format_currency(total_premium)}
+<b>Total Premium:</b> ₹{total_premium:,.2f}
 <b>Lot Size:</b> {strategy['lot_size']}
-<b>Total Cost:</b> {format_currency(total_cost)}
+<b>Total Cost:</b> ₹{total_cost:,.2f}
 
 <b>🎯 Risk Management:</b>
-<b>Stop Loss:</b> {format_currency(targets['stop_loss'])} (-{format_currency(targets['stop_loss_amount'])})
-<b>Target:</b> {format_currency(targets.get('target', 0)) if targets.get('target') else 'Not Set'}
+<b>Stop Loss:</b> ₹{targets['stop_loss']:,.2f} (-₹{targets['stop_loss_amount']:,.2f})
+<b>Target:</b> {f"₹{targets.get('target', 0):,.2f}" if targets.get('target') else 'Not Set'}
 
 <b>💳 Margin Status:</b> {margin_status}
-<b>Available:</b> {format_currency(margin_check.get('available', 0))}
-<b>Required:</b> {format_currency(margin_check.get('required', 0))}
+<b>Available:</b> ₹{margin_check.get('available', 0):,.2f}
+<b>Required:</b> ₹{margin_check.get('required', 0):,.2f}
 
 ⚠️ <b>Confirm to execute this trade</b>
 """
@@ -1027,7 +1036,6 @@ async def execute_trade_preview(update: Update, context: ContextTypes.DEFAULT_TY
         parse_mode=ParseMode.HTML,
         reply_markup=get_trade_confirmation_keyboard(strategy_id)
     )
-
 
 async def confirm_trade_execution(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Execute the trade after confirmation"""
