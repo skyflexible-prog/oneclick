@@ -1098,6 +1098,8 @@ async def execute_trade_preview(update: Update, context: ContextTypes.DEFAULT_TY
         reply_markup=get_trade_confirmation_keyboard(strategy_id)
     )
 
+    return CONFIRMING_TRADE  # ← ADD THIS LINE
+
 async def confirm_trade_execution(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Execute the trade after confirmation"""
     query = update.callback_query
