@@ -1,7 +1,7 @@
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, List
 from trading.delta_api import DeltaExchangeAPI
 from utils.logger import trade_logger
-from utils.helpers import calculate_strike_offset
+from datetime import datetime, timedelta
 import asyncio
 
 
@@ -12,27 +12,104 @@ class StraddleCalculator:
         self.api = api
     
     async def get_atm_strike(self, underlying: str, offset: int = 0) -> Optional[float]:
-        """Get ATM strike price with optional offset"""
+        """
+        Get ATM strike price with optional offset
+        Rounds to nearest 100 for fine granularity
+        Examples: 123530 → 123500, 123690 → 123700
+        """
         try:
             spot_price = await self.api.get_spot_price(underlying)
             if not spot_price:
                 return None
             
-            # Determine strike interval based on underlying
-            strike_interval = 1000.0 if underlying == "BTC" else 100.0
+            # FIXED: Always use 100 interval for nearest rounding
+            strike_interval = 100.0
             
-            # Calculate ATM strike
+            # Calculate ATM strike (nearest 100)
             atm_strike = round(spot_price / strike_interval) * strike_interval
             
             # Apply offset if specified
             if offset != 0:
                 atm_strike = atm_strike + (offset * strike_interval)
             
-            trade_logger.info(f"ATM Strike for {underlying}: {atm_strike} (Spot: {spot_price})")
+            trade_logger.info(f"ATM Strike for {underlying}: {atm_strike} (Spot: {spot_price}, Offset: {offset})")
             return atm_strike
         
         except Exception as e:
-            trade_logger.error(f"Error calculating ATM strike: {e}")
+            trade_logger.error(f"Error calculating ATM strike: {e}", exc_info=True)
+            return None
+    
+    async def get_option_chain(self, underlying: str, expiry_type: str) -> List[Dict]:
+        """
+        Get option chain from Delta Exchange
+        Uses: /v2/tickers?contract_types=call_options,put_options&underlying_asset_symbols=BTC&expiry_date=DD-MM-YYYY
+        """
+        try:
+            # Calculate expiry date based on expiry_type
+            expiry_date = self._get_expiry_date(expiry_type)
+            if not expiry_date:
+                trade_logger.error(f"Could not determine expiry date for {expiry_type}")
+                return []
+            
+            # Build option chain endpoint
+            params = {
+                'contract_types': 'call_options,put_options',
+                'underlying_asset_symbols': underlying.upper()
+            }
+            
+            # Add expiry date if specific
+            if expiry_date != 'all':
+                params['expiry_date'] = expiry_date
+            
+            trade_logger.info(f"Fetching option chain: {underlying}, expiry: {expiry_date}")
+            
+            # Make request
+            response = await self.api._make_request('GET', '/v2/tickers', params=params)
+            
+            if not response or 'result' not in response:
+                trade_logger.error(f"Invalid response from option chain: {response}")
+                return []
+            
+            options = response['result']
+            trade_logger.info(f"Fetched {len(options)} options for {underlying}")
+            
+            return options
+            
+        except Exception as e:
+            trade_logger.error(f"Error fetching option chain: {e}", exc_info=True)
+            return []
+    
+    def _get_expiry_date(self, expiry_type: str) -> Optional[str]:
+        """Convert expiry type to date format DD-MM-YYYY"""
+        try:
+            now = datetime.utcnow()
+            
+            if expiry_type.lower() == 'daily':
+                # Today or tomorrow
+                target_date = now + timedelta(days=1)
+            elif expiry_type.lower() == 'weekly':
+                # Next Friday (weekly expiry)
+                days_ahead = 4 - now.weekday()  # Friday is 4
+                if days_ahead <= 0:
+                    days_ahead += 7
+                target_date = now + timedelta(days=days_ahead)
+            elif expiry_type.lower() == 'monthly':
+                # Last Friday of month
+                # For simplicity, use end of month
+                if now.month == 12:
+                    target_date = datetime(now.year + 1, 1, 1)
+                else:
+                    target_date = datetime(now.year, now.month + 1, 1)
+                target_date = target_date - timedelta(days=1)
+            else:
+                # Return 'all' to get all expiries
+                return 'all'
+            
+            # Format as DD-MM-YYYY
+            return target_date.strftime('%d-%m-%Y')
+            
+        except Exception as e:
+            trade_logger.error(f"Error calculating expiry date: {e}")
             return None
     
     async def find_option_contracts(
@@ -43,38 +120,53 @@ class StraddleCalculator:
     ) -> Tuple[Optional[Dict], Optional[Dict]]:
         """Find call and put option contracts for given strike and expiry"""
         try:
-            options = await self.api.get_option_chain(underlying)
+            # Get option chain
+            options = await self.get_option_chain(underlying, expiry_type)
             
-            call_contract = None
-            put_contract = None
+            if not options:
+                trade_logger.error("No options found in chain")
+                return None, None
             
-            for option in options:
-                symbol = option.get('symbol', '')
-                strike_price = option.get('strike_price')
-                
-                # Match strike price
-                if strike_price and abs(float(strike_price) - strike) < 1.0:
-                    # Match expiry type (approximate)
-                    # This logic needs to be refined based on Delta's actual symbol format
-                    if 'C' in symbol and not call_contract:
-                        call_contract = option
-                    elif 'P' in symbol and not put_contract:
-                        put_contract = option
-                
-                # Break if both found
-                if call_contract and put_contract:
-                    break
+            trade_logger.info(f"Searching for strike {strike} in {len(options)} options")
+            
+            # Filter by strike (allow 50 tolerance)
+            strike_options = [o for o in options if 
+                            'strike_price' in o and 
+                            abs(float(o['strike_price']) - strike) < 50]
+            
+            trade_logger.info(f"Found {len(strike_options)} options at strike ~{strike}")
+            
+            if not strike_options:
+                # Log available strikes
+                available_strikes = sorted(set([float(o.get('strike_price', 0)) 
+                                               for o in options if 'strike_price' in o]))[:20]
+                trade_logger.error(f"Strike {strike} not found. Available strikes: {available_strikes}")
+                return None, None
+            
+            # Find call and put at exact same strike
+            calls = [o for o in strike_options if o.get('contract_type') == 'call_options']
+            puts = [o for o in strike_options if o.get('contract_type') == 'put_options']
+            
+            call_contract = calls[0] if calls else None
+            put_contract = puts[0] if puts else None
             
             if call_contract:
-                trade_logger.info(f"Found Call: {call_contract.get('symbol')}")
+                trade_logger.info(f"✅ Found Call: {call_contract.get('symbol')} at {call_contract.get('strike_price')}")
+            else:
+                trade_logger.error("❌ No Call option found")
+            
             if put_contract:
-                trade_logger.info(f"Found Put: {put_contract.get('symbol')}")
+                trade_logger.info(f"✅ Found Put: {put_contract.get('symbol')} at {put_contract.get('strike_price')}")
+            else:
+                trade_logger.error("❌ No Put option found")
             
             return call_contract, put_contract
         
         except Exception as e:
-            trade_logger.error(f"Error finding option contracts: {e}")
+            trade_logger.error(f"Error finding option contracts: {e}", exc_info=True)
             return None, None
+    
+    # ... rest of the methods remain the same (get_option_premiums, calculate_straddle_cost, etc.) ...
     
     async def get_option_premiums(
         self,
