@@ -18,6 +18,7 @@ from bot.handlers import (
     start_command,
     help_command,
     balance_command,
+    show_balance,              # ✅ ADD THIS
     button_callback,
     add_api_start,
     receive_api_nickname,
@@ -242,7 +243,8 @@ def register_handlers():
     ptb.add_handler(CallbackQueryHandler(close_position_confirm, pattern="^close_position_"))
     ptb.add_handler(CallbackQueryHandler(close_position_execute, pattern="^confirm_close_"))
     
-    # History
+    # ✅ Balance and History (button handlers)
+    ptb.add_handler(CallbackQueryHandler(show_balance, pattern="^balance$"))
     ptb.add_handler(CallbackQueryHandler(show_history, pattern="^history$"))
     
     # Generic callback handlers (LAST - catches everything else)
