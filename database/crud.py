@@ -252,4 +252,17 @@ async def update_order_status(db: AsyncIOMotorDatabase, order_id: str, status: s
         {"_id": ObjectId(order_id)},
         {"$set": update_data}
                       )
-  
+
+
+async def update_trade_status(db, trade_id: ObjectId, status: str):
+    """Update trade status"""
+    try:
+        result = await db.trades.update_one(
+            {'_id': ObjectId(trade_id)},
+            {'$set': {'status': status}}
+        )
+        return result.modified_count > 0
+    except Exception as e:
+        bot_logger.error(f"Error updating trade status: {e}")
+        return False
+        
