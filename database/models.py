@@ -124,4 +124,35 @@ class OrderModel(BaseModel):
     class Config:
         populate_by_name = True
         arbitrary_types_allowed = True
+
+class StrategyModel(BaseModel):
+    """Trading strategy database model"""
+    id: Optional[PyObjectId] = Field(default=None, alias="_id")
+    user_id: PyObjectId
+    api_id: PyObjectId
+    name: str
+    lot_size: int
+    direction: str  # "long" or "short"
+    stop_loss_pct: float
+    target_pct: Optional[float] = None
+    expiry_type: str  # "daily", "weekly", "monthly"
+    strike_offset: int = 0
+    max_capital: float
+    trailing_sl: bool = False
+    underlying: str = "BTC"  # "BTC" or "ETH"
+    
+    # ✅ NEW FIELDS FOR AUTOMATIC ORDERS
+    use_stop_loss_order: bool = False  # Enable/disable auto SL orders
+    sl_trigger_pct: Optional[float] = None  # Stop-loss trigger percentage
+    sl_limit_pct: Optional[float] = None  # Stop-loss limit percentage
+    
+    use_target_order: bool = False  # Enable/disable auto target orders
+    target_trigger_pct: Optional[float] = None  # Target trigger percentage
+    
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    
+    class Config:
+        populate_by_name = True
+        arbitrary_types_allowed = True
         
