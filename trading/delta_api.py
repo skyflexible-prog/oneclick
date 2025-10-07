@@ -257,6 +257,34 @@ class DeltaExchangeAPI:
         
         return await self._make_request('GET', '/v2/positions', params=params)
     
+    async def get_position_by_symbol(self, symbol: str) -> Optional[Dict]:
+        """
+        Get position for a specific symbol
+    
+        Args:
+            symbol: Option symbol (e.g., 'C-BTC-124200-071025')
+    
+        Returns:
+            Position dictionary or None if not found
+        """
+        try:
+            # Get all positions
+            all_positions = await self.get_positions()
+        
+            # Find position matching symbol
+            for position in all_positions:
+                product = position.get('product', {})
+                if product.get('symbol') == symbol:
+                    api_logger.info(f"Found position for {symbol}")
+                    return position
+        
+            api_logger.info(f"No position found for symbol {symbol}")
+            return None
+    
+        except Exception as e:
+            api_logger.error(f"Error getting position for {symbol}: {e}", exc_info=True)
+            return None
+    
     async def get_position_margin(self, symbol: str) -> Dict:
         """Get position margin requirements"""
         return await self._make_request('GET', f'/v2/positions/margined/{symbol}')
