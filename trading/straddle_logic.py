@@ -347,69 +347,109 @@ class StraddleExecutor:
         call_symbol: str,
         put_symbol: str,
         lot_size: int,
+        stop_loss_pct: float,  # NEW: Stop-loss percentage
         use_limit: bool = False,
         price_tolerance: float = 0.02
     ) -> Dict:
-        """Execute short straddle (sell call + sell put)"""
+        """Execute short straddle (sell call + sell put) with stop-loss protection"""
         try:
             trade_logger.info(f"Executing Short Straddle: {call_symbol}, {put_symbol}, Lot: {lot_size}")
+        
+            # Get current premiums
+            call_premium, put_premium = await self.calculator.get_option_premiums(
+                call_symbol, put_symbol
+            )
+        
+            if not call_premium or not put_premium:
+                return {"success": False, "error": "Failed to fetch premiums"}
             
-            # Check margin requirements (higher for short positions)
-            margin_check = await self.api.check_margin_requirements(call_symbol, lot_size)
-            if not margin_check.get("sufficient"):
-                return {
-                    "success": False,
-                    "error": "Insufficient margin",
-                    "details": margin_check
-                }
-            
-            # Place orders concurrently
-            if use_limit:
-                call_premium, put_premium = await self.calculator.get_option_premiums(
-                    call_symbol, put_symbol
-                )
-                
-                if not call_premium or not put_premium:
-                    return {"success": False, "error": "Failed to fetch premiums"}
-                
-                # Reduce tolerance for sell orders
-                call_limit = call_premium * (1 - price_tolerance)
-                put_limit = put_premium * (1 - price_tolerance)
-                
-                call_task = self.api.place_limit_order(call_symbol, "sell", lot_size, call_limit)
-                put_task = self.api.place_limit_order(put_symbol, "sell", lot_size, put_limit)
-            else:
-                # Market orders
-                call_task = self.api.place_market_order(call_symbol, "sell", lot_size)
-                put_task = self.api.place_market_order(put_symbol, "sell", lot_size)
-            
+            # Place market sell orders for both legs
+            call_task = self.api.place_market_order(call_symbol, "sell", lot_size)
+            put_task = self.api.place_market_order(put_symbol, "sell", lot_size)
+        
             call_order, put_order = await asyncio.gather(call_task, put_task)
-            
+        
             # Check if both orders succeeded
             if 'error' in call_order or 'error' in put_order:
-                # Rollback
-                if 'error' not in call_order:
-                    await self.api.cancel_order(call_order['result']['id'])
-                if 'error' not in put_order:
-                    await self.api.cancel_order(put_order['result']['id'])
-                
                 return {
                     "success": False,
                     "error": "Order execution failed",
                     "call_order": call_order,
                     "put_order": put_order
                 }
-            
+        
             trade_logger.info("Short Straddle executed successfully")
+        
+            # NEW: Place stop-loss orders
+            await self._place_straddle_stop_loss(
+                call_symbol, 
+                put_symbol, 
+                lot_size, 
+                call_premium, 
+                put_premium, 
+                stop_loss_pct
+            )
+        
             return {
                 "success": True,
                 "call_order": call_order['result'],
-                "put_order": put_order['result']
+                "put_order": put_order['result'],
+                "entry_premium": call_premium + put_premium
             }
-        
+    
         except Exception as e:
             trade_logger.error(f"Error executing short straddle: {e}")
             return {"success": False, "error": str(e)}
+
+
+    async def _place_straddle_stop_loss(
+        self,
+        call_symbol: str,
+        put_symbol: str,
+        lot_size: int,
+        call_premium: float,
+        put_premium: float,
+        stop_loss_pct: float
+    ) -> None:
+        """Place stop-loss orders for both legs of straddle"""
+        try:
+            # Calculate stop-loss levels
+            # For short straddle, buy back when premium increases
+            call_sl_trigger = call_premium * (1 + stop_loss_pct / 100)
+            call_sl_limit = call_sl_trigger * 1.02  # 2% slippage allowance
+        
+            put_sl_trigger = put_premium * (1 + stop_loss_pct / 100)
+            put_sl_limit = put_sl_trigger * 1.02
+        
+            # Place stop-loss buy orders
+            call_sl_task = self.api.place_stop_limit_order(
+                product_symbol=call_symbol,
+                side='buy',  # Buy to close short
+                size=lot_size,
+                stop_price=str(call_sl_trigger),
+                limit_price=str(call_sl_limit),
+                reduce_only=True
+            )
+        
+            put_sl_task = self.api.place_stop_limit_order(
+                product_symbol=put_symbol,
+                side='buy',
+                size=lot_size,
+                stop_price=str(put_sl_trigger),
+                limit_price=str(put_sl_limit),
+                reduce_only=True
+            )
+        
+            call_sl, put_sl = await asyncio.gather(call_sl_task, put_sl_task)
+        
+            if 'result' in call_sl and 'result' in put_sl:
+                trade_logger.info(f"✅ Stop-loss orders placed: Call @ {call_sl_trigger}, Put @ {put_sl_trigger}")
+            else:
+                trade_logger.error(f"Failed to place stop-loss orders: Call={call_sl}, Put={put_sl}")
+        
+        except Exception as e:
+            trade_logger.error(f"Error placing stop-loss: {e}")
+
     
     async def close_straddle_position(
         self,
