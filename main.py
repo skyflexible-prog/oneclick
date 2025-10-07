@@ -185,7 +185,7 @@ def register_handlers():
                 CallbackQueryHandler(execute_trade_preview, pattern="^execute_")
             ],
             CONFIRMING_TRADE: [
-                CallbackQueryHandler(confirm_trade_execution, pattern="^confirm_trade")
+                CallbackQueryHandler(confirm_trade_execution, pattern="^confirm_trade"),  # Accepts both with and without ID
             ],
         },
         fallbacks=[
