@@ -13,6 +13,11 @@ from trading.position_monitor import PositionMonitor
 from typing import Dict
 import asyncio
 
+# Trade states
+SELECTING_API = 50
+SELECTING_STRATEGY = 51
+CONFIRMING_TRADE = 52
+
 # Conversation states
 (
     AWAITING_API_NICKNAME, AWAITING_API_KEY, AWAITING_API_SECRET,
@@ -888,7 +893,6 @@ async def trade_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     return SELECTING_API
 
-
 async def select_api_for_trade(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """After API selection, show strategies"""
     query = update.callback_query
@@ -924,7 +928,7 @@ async def select_api_for_trade(update: Update, context: ContextTypes.DEFAULT_TYP
         f"🔑 <b>Selected API:</b> {api_data.get('nickname', 'Unnamed')}\n\n"
         f"Select a strategy to execute:",
         parse_mode=ParseMode.HTML,
-        reply_markup=get_strategy_execution_keyboard(strategies)
+        reply_markup=get_trade_execution_keyboard(strategies)
     )
     
     return SELECTING_STRATEGY
