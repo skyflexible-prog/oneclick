@@ -1101,15 +1101,22 @@ async def execute_trade_preview(update: Update, context: ContextTypes.DEFAULT_TY
 async def confirm_trade_execution(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Execute the trade after confirmation"""
     query = update.callback_query
-    strategy_id = query.data.split('_')[-1]
     user = query.from_user
     
     session = get_user_session(user.id)
     preview = session.get('trade_preview')
     
-    if not preview or preview['strategy_id'] != strategy_id:
+    if not preview:
         await query.answer("Trade preview expired. Please try again.", show_alert=True)
-        return
+        await query.edit_message_text(
+            "❌ <b>Trade preview expired.</b>\n\nPlease try again.",
+            parse_mode=ParseMode.HTML,
+            reply_markup=get_main_menu_keyboard()
+        )
+        return ConversationHandler.END
+    
+    # Get strategy_id from preview (stored during execute_trade_preview)
+    strategy_id = preview['strategy_id']
     
     await query.answer()
     await query.edit_message_text(
