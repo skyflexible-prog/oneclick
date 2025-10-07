@@ -138,16 +138,35 @@ class DeltaExchangeAPI:
     async def get_spot_price(self, underlying: str) -> Optional[float]:
         """Get current spot price for underlying (BTC, ETH)"""
         try:
-            # Get ticker for spot index
-            symbol = f".D{underlying}USD"  # Delta spot index format
+            # Delta Exchange India index symbol format
+            if underlying.upper() == "BTC":
+                symbol = ".DEXBTUSD"  # BTC spot index
+            elif underlying.upper() == "ETH":
+                symbol = ".DEETHUSD"  # ETH spot index (verify this)
+            else:
+                api_logger.error(f"Unsupported underlying: {underlying}")
+                return None
+        
+            # Get ticker data
             response = await self.get_tickers(symbol)
-            
+        
             if 'result' in response and response['result']:
-                return float(response['result']['mark_price'])
+                # Try multiple price fields in order of preference
+                result = response['result']
             
+                # Check for mark_price first, then close, then spot_price
+                if 'mark_price' in result and result['mark_price']:
+                    return float(result['mark_price'])
+                elif 'close' in result and result['close']:
+                    return float(result['close'])
+                elif 'spot_price' in result and result['spot_price']:
+                    return float(result['spot_price'])
+        
+            api_logger.error(f"No price data in response for {symbol}")
             return None
+        
         except Exception as e:
-            api_logger.error(f"Error fetching spot price: {e}")
+            api_logger.error(f"Error fetching spot price for {underlying}: {e}")
             return None
     
     async def get_option_chain(self, underlying: str, expiry_date: str = None) -> List[Dict]:
