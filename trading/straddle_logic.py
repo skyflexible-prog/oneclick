@@ -370,134 +370,289 @@ class StraddleExecutor:
         self.calculator = StraddleCalculator(api)
     
     async def execute_long_straddle(
-        self,
-        call_symbol: str,
-        put_symbol: str,
+        self, 
+        call_symbol: str, 
+        put_symbol: str, 
         lot_size: int,
-        use_limit: bool = False,
-        price_tolerance: float = 0.02
-    ) -> Dict:
-        """Execute long straddle (buy call + buy put)"""
+        use_stop_loss_order: bool = False,
+        sl_trigger_pct: float = None,
+        sl_limit_pct: float = None,
+        use_target_order: bool = False,
+        target_trigger_pct: float = None
+    ) -> dict:
+        """
+        Execute long straddle (BUY both options) with optional stop-loss and target orders
+    
+        Args:
+            call_symbol: Call option symbol
+            put_symbol: Put option symbol
+            lot_size: Number of contracts
+            use_stop_loss_order: Whether to place stop-loss orders
+            sl_trigger_pct: Stop-loss trigger percentage (e.g., 50 = 50% loss)
+            sl_limit_pct: Stop-loss limit percentage (e.g., 55 = 55% loss)
+            use_target_order: Whether to place target orders
+            target_trigger_pct: Target trigger percentage (e.g., 100 = 100% profit)
+    
+        Returns:
+            dict: Execution result with order details
+        """
+        trade_logger.info(f"Executing Long Straddle: {call_symbol}, {put_symbol}, Lot: {lot_size}")
+    
         try:
-            trade_logger.info(f"Executing Long Straddle: {call_symbol}, {put_symbol}, Lot: {lot_size}")
+            # Check available balance
+            balance = await self.api.get_wallet_balance()
+            available_balance = float(balance.get('available_balance', 0))
+            trade_logger.info(f"Available balance: ${available_balance}")
+        
+            # Place market BUY orders for both options
+            call_order = await self.api.place_order(
+                symbol=call_symbol,
+                side='buy',
+                order_type='market_order',
+                size=lot_size
+            )
+        
+            put_order = await self.api.place_order(
+                symbol=put_symbol,
+                side='buy',
+                order_type='market_order',
+                size=lot_size
+            )
+        
+            trade_logger.info(f"Long Straddle executed successfully")
+        
+            # Get filled prices for SL/Target calculation
+            call_price = float(call_order['result'].get('average_fill_price', 0))
+            put_price = float(put_order['result'].get('average_fill_price', 0))
+        
+            sl_orders = []
+            target_orders = []
+        
+            # ✅ PLACE STOP-LOSS ORDERS (if enabled)
+            if use_stop_loss_order and sl_trigger_pct and sl_limit_pct:
+                trade_logger.info(f"Placing stop-loss orders (Trigger: {sl_trigger_pct}%, Limit: {sl_limit_pct}%)")
             
-            # Check margin requirements
-            margin_check = await self.api.check_margin_requirements(call_symbol, lot_size)
-            if not margin_check.get("sufficient"):
-                return {
-                    "success": False,
-                    "error": "Insufficient margin",
-                    "details": margin_check
-                }
+                # Calculate SL prices
+                call_sl_trigger = call_price * (1 - sl_trigger_pct / 100)
+                call_sl_limit = call_price * (1 - sl_limit_pct / 100)
             
-            # Place orders concurrently
-            if use_limit:
-                # Get current premiums for limit orders
-                call_premium, put_premium = await self.calculator.get_option_premiums(
-                    call_symbol, put_symbol
+                put_sl_trigger = put_price * (1 - sl_trigger_pct / 100)
+                put_sl_limit = put_price * (1 - sl_limit_pct / 100)
+            
+                # Place stop-limit SELL orders for Call
+                call_sl_order = await self.api.place_order(
+                    symbol=call_symbol,
+                    side='sell',
+                    order_type='stop_limit_order',
+                    size=lot_size,
+                    limit_price=call_sl_limit,
+                    stop_price=call_sl_trigger,
+                    reduce_only=True  # Ensures it only closes existing position
                 )
-                
-                if not call_premium or not put_premium:
-                    return {"success": False, "error": "Failed to fetch premiums"}
-                
-                # Add tolerance to limit prices
-                call_limit = call_premium * (1 + price_tolerance)
-                put_limit = put_premium * (1 + price_tolerance)
-                
-                call_task = self.api.place_limit_order(call_symbol, "buy", lot_size, call_limit)
-                put_task = self.api.place_limit_order(put_symbol, "buy", lot_size, put_limit)
-            else:
-                # Market orders
-                call_task = self.api.place_market_order(call_symbol, "buy", lot_size)
-                put_task = self.api.place_market_order(put_symbol, "buy", lot_size)
             
-            call_order, put_order = await asyncio.gather(call_task, put_task)
+                # Place stop-limit SELL orders for Put
+                put_sl_order = await self.api.place_order(
+                    symbol=put_symbol,
+                    side='sell',
+                    order_type='stop_limit_order',
+                    size=lot_size,
+                    limit_price=put_sl_limit,
+                    stop_price=put_sl_trigger,
+                    reduce_only=True
+                )
             
-            # Check if both orders succeeded
-            if 'error' in call_order or 'error' in put_order:
-                # Rollback: cancel filled orders
-                if 'error' not in call_order:
-                    await self.api.cancel_order(call_order['result']['id'])
-                if 'error' not in put_order:
-                    await self.api.cancel_order(put_order['result']['id'])
+                sl_orders = [call_sl_order, put_sl_order]
+                trade_logger.info(f"✅ Stop-loss orders placed successfully")
+        
+            # ✅ PLACE TARGET ORDERS (if enabled)
+            if use_target_order and target_trigger_pct:
+                trade_logger.info(f"Placing target orders (Target: {target_trigger_pct}%)")
                 
-                return {
-                    "success": False,
-                    "error": "Order execution failed",
-                    "call_order": call_order,
-                    "put_order": put_order
-                }
+                # Calculate target prices
+                call_target_price = call_price * (1 + target_trigger_pct / 100)
+                put_target_price = put_price * (1 + target_trigger_pct / 100)
             
-            trade_logger.info("Long Straddle executed successfully")
+                # Place limit SELL orders at target prices
+                call_target_order = await self.api.place_order(
+                    symbol=call_symbol,
+                    side='sell',
+                    order_type='limit_order',
+                    size=lot_size,
+                    limit_price=call_target_price,
+                    reduce_only=True
+                )
+            
+                put_target_order = await self.api.place_order(
+                    symbol=put_symbol,
+                    side='sell',
+                    order_type='limit_order',
+                    size=lot_size,
+                    limit_price=put_target_price,
+                    reduce_only=True
+                )
+            
+                target_orders = [call_target_order, put_target_order]
+                trade_logger.info(f"✅ Target orders placed successfully")
+        
             return {
-                "success": True,
-                "call_order": call_order['result'],
-                "put_order": put_order['result']
+                'success': True,
+                'call_order': call_order,
+                'put_order': put_order,
+                'sl_orders': sl_orders,
+                'target_orders': target_orders,
+                'call_price': call_price,
+                'put_price': put_price
             }
         
         except Exception as e:
-            trade_logger.error(f"Error executing long straddle: {e}")
-            return {"success": False, "error": str(e)}
+            trade_logger.error(f"Long straddle execution failed: {e}")
+            return {
+                'success': False,
+                'error': str(e)
+            }
     
     async def execute_short_straddle(
-        self,
-        call_symbol: str,
-        put_symbol: str,
+        self, 
+        call_symbol: str, 
+        put_symbol: str, 
         lot_size: int,
-        stop_loss_pct: float,  # NEW: Stop-loss percentage
-        use_limit: bool = False,
-        price_tolerance: float = 0.02
-    ) -> Dict:
-        """Execute short straddle (sell call + sell put) with stop-loss protection"""
+        stop_loss_pct: float = None,
+        use_stop_loss_order: bool = True,
+        sl_trigger_pct: float = None,
+        sl_limit_pct: float = None,
+        use_target_order: bool = False,
+        target_trigger_pct: float = None
+    ) -> dict:
+        """
+        Execute short straddle (SELL both options) with optional stop-loss and target orders
+    
+        Args:
+            call_symbol: Call option symbol
+            put_symbol: Put option symbol
+            lot_size: Number of contracts
+            stop_loss_pct: Stop loss percentage (legacy, for backward compatibility)
+            use_stop_loss_order: Whether to place stop-loss orders
+            sl_trigger_pct: Stop-loss trigger percentage
+            sl_limit_pct: Stop-loss limit percentage
+            use_target_order: Whether to place target orders
+            target_trigger_pct: Target trigger percentage
+    
+        Returns:
+            dict: Execution result with order details
+        """
+        trade_logger.info(f"Executing Short Straddle: {call_symbol}, {put_symbol}, Lot: {lot_size}")
+        
         try:
-            trade_logger.info(f"Executing Short Straddle: {call_symbol}, {put_symbol}, Lot: {lot_size}")
+            # Check available balance
+            balance = await self.api.get_wallet_balance()
+            available_balance = float(balance.get('available_balance', 0))
+            trade_logger.info(f"Available balance: ${available_balance}")
         
-            # Get current premiums
-            call_premium, put_premium = await self.calculator.get_option_premiums(
-                call_symbol, put_symbol
+            # Place market SELL orders for both options
+            call_order = await self.api.place_order(
+                symbol=call_symbol,
+                side='sell',
+                order_type='market_order',
+                size=lot_size
             )
         
-            if not call_premium or not put_premium:
-                return {"success": False, "error": "Failed to fetch premiums"}
+            put_order = await self.api.place_order(
+                symbol=put_symbol,
+                side='sell',
+                order_type='market_order',
+                size=lot_size
+            )
+        
+            trade_logger.info(f"Short Straddle executed successfully")
+        
+            # Get filled prices
+            call_price = float(call_order['result'].get('average_fill_price', 0))
+            put_price = float(put_order['result'].get('average_fill_price', 0))
+        
+            sl_orders = []
+            target_orders = []
+        
+            # ✅ PLACE STOP-LOSS ORDERS (if enabled)
+            if use_stop_loss_order and sl_trigger_pct and sl_limit_pct:
+                trade_logger.info(f"Placing stop-loss orders (Trigger: {sl_trigger_pct}%, Limit: {sl_limit_pct}%)")
             
-            # Place market sell orders for both legs
-            call_task = self.api.place_market_order(call_symbol, "sell", lot_size)
-            put_task = self.api.place_market_order(put_symbol, "sell", lot_size)
+                # For short positions, SL = BUY at higher price
+                call_sl_trigger = call_price * (1 + sl_trigger_pct / 100)
+                call_sl_limit = call_price * (1 + sl_limit_pct / 100)
+            
+                put_sl_trigger = put_price * (1 + sl_trigger_pct / 100)
+                put_sl_limit = put_price * (1 + sl_limit_pct / 100)
+            
+                # Place stop-limit BUY orders
+                call_sl_order = await self.api.place_order(
+                    symbol=call_symbol,
+                    side='buy',
+                    order_type='stop_limit_order',
+                    size=lot_size,
+                    limit_price=call_sl_limit,
+                    stop_price=call_sl_trigger,
+                    reduce_only=True
+                )
+            
+                put_sl_order = await self.api.place_order(
+                    symbol=put_symbol,
+                    side='buy',
+                    order_type='stop_limit_order',
+                    size=lot_size,
+                    limit_price=put_sl_limit,
+                    stop_price=put_sl_trigger,
+                    reduce_only=True
+                )
+            
+                sl_orders = [call_sl_order, put_sl_order]
+                trade_logger.info(f"✅ Stop-loss orders placed successfully")
         
-            call_order, put_order = await asyncio.gather(call_task, put_task)
-        
-            # Check if both orders succeeded
-            if 'error' in call_order or 'error' in put_order:
-                return {
-                    "success": False,
-                    "error": "Order execution failed",
-                    "call_order": call_order,
-                    "put_order": put_order
-                }
-        
-            trade_logger.info("Short Straddle executed successfully")
-        
-            # NEW: Place stop-loss orders
-            await self._place_straddle_stop_loss(
-                call_symbol, 
-                put_symbol, 
-                lot_size, 
-                call_premium, 
-                put_premium, 
-                stop_loss_pct
-            )
+            # ✅ PLACE TARGET ORDERS (if enabled)
+            if use_target_order and target_trigger_pct:
+                trade_logger.info(f"Placing target orders (Target: {target_trigger_pct}%)")
+            
+                # For short positions, target = BUY at lower price (profit)
+                call_target_price = call_price * (1 - target_trigger_pct / 100)
+                put_target_price = put_price * (1 - target_trigger_pct / 100)
+            
+                # Place limit BUY orders at target prices
+                call_target_order = await self.api.place_order(
+                    symbol=call_symbol,
+                    side='buy',
+                    order_type='limit_order',
+                    size=lot_size,
+                    limit_price=call_target_price,
+                    reduce_only=True
+                )
+            
+                put_target_order = await self.api.place_order(
+                    symbol=put_symbol,
+                    side='buy',
+                    order_type='limit_order',
+                    size=lot_size,
+                    limit_price=put_target_price,
+                    reduce_only=True
+                )
+            
+                target_orders = [call_target_order, put_target_order]
+                trade_logger.info(f"✅ Target orders placed successfully")
         
             return {
-                "success": True,
-                "call_order": call_order['result'],
-                "put_order": put_order['result'],
-                "entry_premium": call_premium + put_premium
+                'success': True,
+                'call_order': call_order,
+                'put_order': put_order,
+                'sl_orders': sl_orders,
+                'target_orders': target_orders,
+                'call_price': call_price,
+                'put_price': put_price
             }
-    
+        
         except Exception as e:
-            trade_logger.error(f"Error executing short straddle: {e}")
-            return {"success": False, "error": str(e)}
-
+            trade_logger.error(f"Short straddle execution failed: {e}")
+            return {
+                'success': False,
+                'error': str(e)
+            }
 
     async def _place_straddle_stop_loss(
         self,
