@@ -249,17 +249,34 @@ class DeltaExchangeAPI:
         """Get wallet balance and available margin"""
         return await self._make_request('GET', '/v2/wallet/balances')
     
-    async def get_positions(self, symbol: str = None) -> Dict:
-        """Get open positions"""
-        params = {}
-        if symbol:
-            params['symbol'] = symbol
-        
-        return await self._make_request('GET', '/v2/positions', params=params)
+    async def get_positions(self) -> List[Dict]:
+    """
+    Get all open positions
     
+    Returns:
+        List of position dictionaries
+    """
+    try:
+        # Get all positions (no parameters)
+        response = await self._make_request('GET', '/v2/positions')
+        
+        if 'result' not in response:
+            api_logger.error(f"Failed to fetch positions: {response}")
+            return []
+        
+        positions = response['result']
+        api_logger.info(f"Fetched {len(positions)} positions")
+        
+        return positions
+    
+    except Exception as e:
+        api_logger.error(f"Error getting positions: {e}", exc_info=True)
+        return []
+
+
     async def get_position_by_symbol(self, symbol: str) -> Optional[Dict]:
         """
-        Get position for a specific symbol
+        Get position for a specific symbol by filtering all positions
     
         Args:
             symbol: Option symbol (e.g., 'C-BTC-124200-071025')
@@ -284,7 +301,7 @@ class DeltaExchangeAPI:
         except Exception as e:
             api_logger.error(f"Error getting position for {symbol}: {e}", exc_info=True)
             return None
-    
+
     async def get_position_margin(self, symbol: str) -> Dict:
         """Get position margin requirements"""
         return await self._make_request('GET', f'/v2/positions/margined/{symbol}')
