@@ -91,36 +91,49 @@ class StraddleCalculator:
     def _get_expiry_date(self, expiry_type: str) -> Optional[str]:
         """Convert expiry type to date format DD-MM-YYYY"""
         try:
-            now = datetime.utcnow()
-            
+            import pytz
+        
+            # Use IST timezone
+            ist = pytz.timezone('Asia/Kolkata')
+            now = datetime.now(ist)
+        
             if expiry_type.lower() == 'daily':
-                # Today or tomorrow
-                target_date = now + timedelta(days=1)
+                # Daily expiry is at 5:30 PM IST
+                # If current time is before 5:30 PM, use today
+                # If after 5:30 PM, use tomorrow
+                expiry_time = now.replace(hour=17, minute=30, second=0, microsecond=0)
+            
+                if now < expiry_time:
+                    # Before 5:30 PM - use today's expiry
+                    target_date = now
+                else:
+                    # After 5:30 PM - use tomorrow's expiry
+                    target_date = now + timedelta(days=1)
+        
             elif expiry_type.lower() == 'weekly':
-                # Next Friday (weekly expiry)
-                days_ahead = 4 - now.weekday()  # Friday is 4
+                # Next Friday
+                days_ahead = 4 - now.weekday()
                 if days_ahead <= 0:
                     days_ahead += 7
                 target_date = now + timedelta(days=days_ahead)
+        
             elif expiry_type.lower() == 'monthly':
-                # Last Friday of month
-                # For simplicity, use end of month
+                # Last Friday of current/next month
                 if now.month == 12:
-                    target_date = datetime(now.year + 1, 1, 1)
+                    target_date = datetime(now.year + 1, 1, 1, tzinfo=ist)
                 else:
-                    target_date = datetime(now.year, now.month + 1, 1)
+                    target_date = datetime(now.year, now.month + 1, 1, tzinfo=ist)
                 target_date = target_date - timedelta(days=1)
             else:
-                # Return 'all' to get all expiries
                 return 'all'
-            
+        
             # Format as DD-MM-YYYY
             return target_date.strftime('%d-%m-%Y')
-            
+        
         except Exception as e:
             trade_logger.error(f"Error calculating expiry date: {e}")
             return None
-    
+
     async def find_option_contracts(
         self,
         underlying: str,
