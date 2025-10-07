@@ -348,7 +348,8 @@ class DeltaExchangeAPI:
         if limit_price and order_type == "limit_order":
             data["limit_price"] = str(limit_price)
         
-        if stop_price and "stop" in order_type:
+        if stop_price:
+            data["stop_order_type"] = "stop_loss_order"
             data["stop_price"] = str(stop_price)
         
         return await self._make_request('POST', '/v2/orders', data=data)
