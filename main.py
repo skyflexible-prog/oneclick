@@ -34,7 +34,11 @@ from bot.handlers import (
     receive_expiry,
     receive_lot_size,
     receive_stop_loss,
+    receive_sl_order_choice,        # ✅ NEW
+    receive_sl_trigger,              # ✅ NEW
+    receive_sl_limit,                # ✅ NEW
     receive_target,
+    receive_target_order_choice,     # ✅ NEW
     receive_max_capital,
     receive_strike_offset,
     list_strategies,
@@ -57,7 +61,11 @@ from bot.handlers import (
     AWAITING_STRATEGY_NAME,
     AWAITING_LOT_SIZE,
     AWAITING_STOP_LOSS,
+    AWAITING_SL_ORDER_CHOICE,        # ✅ NEW
+    AWAITING_SL_TRIGGER,              # ✅ NEW
+    AWAITING_SL_LIMIT,                # ✅ NEW
     AWAITING_TARGET,
+    AWAITING_TARGET_ORDER_CHOICE,     # ✅ NEW
     AWAITING_MAX_CAPITAL,
     AWAITING_STRIKE_OFFSET,
     SELECTING_API,                  # ← ADD THIS
