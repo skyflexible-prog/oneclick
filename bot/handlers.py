@@ -668,36 +668,221 @@ async def receive_stop_loss(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     session['strategy_data']['stop_loss_pct'] = sl_pct
     
+    # ✅ ASK IF USER WANTS AUTO STOP-LOSS ORDERS
     await update.message.reply_text(
         f"✅ Stop Loss: <b>{sl_pct}%</b>\n\n"
-        "Please enter the <b>target percentage</b> (optional, send 0 to skip):",
+        "📊 <b>Automatic Stop-Loss Orders</b>\n\n"
+        "Do you want to place automatic stop-loss orders on Delta Exchange when trade is executed?\n\n"
+        "✅ <b>Yes:</b> Stop-loss orders will be placed automatically\n"
+        "❌ <b>No:</b> Manual monitoring only",
         parse_mode=ParseMode.HTML,
-        reply_markup=get_cancel_keyboard()
+        reply_markup=InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("✅ Yes, place SL orders", callback_data="sl_order_yes"),
+                InlineKeyboardButton("❌ No, manual only", callback_data="sl_order_no")
+            ]
+        ])
     )
     
-    return AWAITING_TARGET
+    return AWAITING_SL_ORDER_CHOICE  # ✅ NEW STATE
 
+
+async def receive_sl_order_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle stop-loss order choice"""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = query.from_user.id
+    session = get_user_session(user_id)
+    
+    if query.data == "sl_order_yes":
+        session['strategy_data']['use_stop_loss_order'] = True
+        
+        await query.edit_message_text(
+            "📊 <b>Stop-Loss Trigger Percentage</b>\n\n"
+            "At what percentage loss should the stop-loss order trigger?\n\n"
+            "Example: Enter <b>50</b> for 50% loss\n\n"
+            "💡 <b>Tip:</b> This should be same or slightly less than your stop-loss %",
+            parse_mode=ParseMode.HTML
+        )
+        
+        return AWAITING_SL_TRIGGER
+    
+    else:
+        session['strategy_data']['use_stop_loss_order'] = False
+        session['strategy_data']['sl_trigger_pct'] = None
+        session['strategy_data']['sl_limit_pct'] = None
+        
+        await query.edit_message_text(
+            "🎯 <b>Target Profit (Optional)</b>\n\n"
+            "Enter target profit percentage, or enter <b>0</b> to skip:",
+            parse_mode=ParseMode.HTML
+        )
+        
+        return AWAITING_TARGET
+
+
+async def receive_sl_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Receive SL trigger percentage"""
+    message = update.message
+    user_id = message.from_user.id
+    
+    try:
+        sl_trigger_pct = float(message.text)
+        
+        if sl_trigger_pct <= 0 or sl_trigger_pct > 100:
+            await message.reply_text(
+                "❌ Invalid percentage. Please enter between 0 and 100:",
+                reply_markup=get_cancel_keyboard()
+            )
+            return AWAITING_SL_TRIGGER
+        
+        session = get_user_session(user_id)
+        session['strategy_data']['sl_trigger_pct'] = sl_trigger_pct
+        
+        await message.reply_text(
+            "📊 <b>Stop-Loss Limit Percentage</b>\n\n"
+            "At what percentage should the limit order be placed?\n\n"
+            "Example: Enter <b>55</b> for 55% loss (5% buffer from trigger)\n\n"
+            "💡 <b>Tip:</b> This should be slightly higher than trigger % to ensure order fills",
+            parse_mode=ParseMode.HTML,
+            reply_markup=get_cancel_keyboard()
+        )
+        
+        return AWAITING_SL_LIMIT
+        
+    except ValueError:
+        await message.reply_text(
+            "❌ Invalid number. Please enter trigger percentage:",
+            reply_markup=get_cancel_keyboard()
+        )
+        return AWAITING_SL_TRIGGER
+
+
+async def receive_sl_limit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Receive SL limit percentage"""
+    message = update.message
+    user_id = message.from_user.id
+    
+    try:
+        sl_limit_pct = float(message.text)
+        
+        if sl_limit_pct <= 0 or sl_limit_pct > 100:
+            await message.reply_text(
+                "❌ Invalid percentage. Please enter between 0 and 100:",
+                reply_markup=get_cancel_keyboard()
+            )
+            return AWAITING_SL_LIMIT
+        
+        session = get_user_session(user_id)
+        session['strategy_data']['sl_limit_pct'] = sl_limit_pct
+        
+        await message.reply_text(
+            "🎯 <b>Target Profit (Optional)</b>\n\n"
+            "Enter target profit percentage, or enter <b>0</b> to skip:",
+            parse_mode=ParseMode.HTML,
+            reply_markup=get_cancel_keyboard()
+        )
+        
+        return AWAITING_TARGET
+        
+    except ValueError:
+        await message.reply_text(
+            "❌ Invalid number. Please enter limit percentage:",
+            reply_markup=get_cancel_keyboard()
+        )
+        return AWAITING_SL_LIMIT
+
+
+async def receive_target_order_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle target order choice"""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = query.from_user.id
+    session = get_user_session(user_id)
+    
+    if query.data == "target_order_yes":
+        session['strategy_data']['use_target_order'] = True
+        session['strategy_data']['target_trigger_pct'] = session['strategy_data']['target_pct']
+    else:
+        session['strategy_data']['use_target_order'] = False
+        session['strategy_data']['target_trigger_pct'] = None
+    
+    await query.edit_message_text(
+        "💰 <b>Maximum Capital (Optional)</b>\n\n"
+        "Enter maximum capital to use for this strategy, or enter <b>0</b> to skip:",
+        parse_mode=ParseMode.HTML
+    )
+    
+    return AWAITING_MAX_CAPITAL
+    
 
 async def receive_target(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Receive target percentage"""
+    """Receive target profit percentage"""
     user = update.effective_user
     session = get_user_session(user.id)
     
-    is_valid, message, target_pct = validator.validate_percentage(update.message.text, allow_zero=True)
+    is_valid, message, target_pct = validator.validate_percentage(update.message.text, required=False)
     if not is_valid:
         await update.message.reply_text(
-            f"❌ {message}\n\nPlease enter a valid target percentage (or 0 to skip):",
+            f"❌ {message}\n\nPlease enter a valid target percentage or 0 to skip:",
             reply_markup=get_cancel_keyboard()
         )
         return AWAITING_TARGET
     
     session['strategy_data']['target_pct'] = target_pct if target_pct > 0 else None
     
-    await update.message.reply_text(
-        f"✅ Target: <b>{target_pct}%</b>\n\n"
-        "Please enter the <b>maximum capital allocation</b> in INR:",
-        parse_mode=ParseMode.HTML,
-        reply_markup=get_cancel_keyboard()
+    # ✅ IF TARGET > 0, ASK ABOUT AUTO TARGET ORDERS
+    if target_pct > 0:
+        await update.message.reply_text(
+            f"✅ Target: <b>{target_pct}%</b>\n\n"
+            "📊 <b>Automatic Target Orders</b>\n\n"
+            "Do you want to place automatic target (take-profit) orders?\n\n"
+            "✅ <b>Yes:</b> Target orders will be placed automatically\n"
+            "❌ <b>No:</b> Manual exit at target",
+            parse_mode=ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("✅ Yes, place target orders", callback_data="target_order_yes"),
+                    InlineKeyboardButton("❌ No, manual exit", callback_data="target_order_no")
+                ]
+            ])
+        )
+        return AWAITING_TARGET_ORDER_CHOICE  # ✅ NEW STATE
+    else:
+        # No target, skip to max capital
+        session['strategy_data']['use_target_order'] = False
+        session['strategy_data']['target_trigger_pct'] = None
+        
+        await update.message.reply_text(
+            "💰 <b>Maximum Capital (Optional)</b>\n\n"
+            "Enter maximum capital to use for this strategy, or enter <b>0</b> to skip:",
+            parse_mode=ParseMode.HTML,
+            reply_markup=get_cancel_keyboard()
+        )
+        return AWAITING_MAX_CAPITAL
+
+
+async def receive_target_order_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle target order choice"""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = query.from_user.id
+    session = get_user_session(user_id)
+    
+    if query.data == "target_order_yes":
+        session['strategy_data']['use_target_order'] = True
+        session['strategy_data']['target_trigger_pct'] = session['strategy_data']['target_pct']
+    else:
+        session['strategy_data']['use_target_order'] = False
+        session['strategy_data']['target_trigger_pct'] = None
+    
+    await query.edit_message_text(
+        "💰 <b>Maximum Capital (Optional)</b>\n\n"
+        "Enter maximum capital to use for this strategy, or enter <b>0</b> to skip:",
+        parse_mode=ParseMode.HTML
     )
     
     return AWAITING_MAX_CAPITAL
