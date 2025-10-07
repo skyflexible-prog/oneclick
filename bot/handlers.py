@@ -1202,7 +1202,7 @@ async def show_positions(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             # Skip if NEITHER position exists (position expired/closed)
             if not call_pos and not put_pos:
-                api_logger.info(f"Position {trade['_id']} has no live data - likely expired")
+                bot_logger.info(f"Position {trade['_id']} has no live data - likely expired")
                 # Mark as closed in database
                 await crud.update_trade_status(db, trade['_id'], 'closed')
                 continue
