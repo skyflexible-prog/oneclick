@@ -1583,85 +1583,103 @@ View your position: /positions
 # ==================== POSITION MANAGEMENT HANDLERS ====================
 
 async def show_positions(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show all open positions"""
-    user = update.effective_user
+    """Show open positions from ALL APIs"""
+    query = update.callback_query
+    await query.answer()
+    
+    await query.edit_message_text("🔄 Fetching positions from all APIs...")
+    
     db = Database.get_database()
-    
+    user = query.from_user
     user_data = await crud.get_user_by_telegram_id(db, user.id)
-    trades = await crud.get_user_trades(db, user_data['_id'], status='open')
     
-    if not trades:
-        await update.callback_query.answer()
-        await update.callback_query.edit_message_text(
-            "📈 <b>Open Positions</b>\n\n"
-            "You have no open positions at the moment.",
+    if not user_data:
+        await query.edit_message_text(
+            "❌ User not found.",
             parse_mode=ParseMode.HTML,
             reply_markup=get_main_menu_keyboard()
         )
         return
     
-    # Get live P&L for each position
-    positions_with_pnl = []
+    # Get all API credentials
+    apis = await crud.get_user_api_credentials(db, user_data['_id'])
     
-    for trade in trades:
-        # Get API credentials
-        api_data = await crud.get_api_credential_by_id(db, trade['api_id'])
-        api_key = encryptor.decrypt(api_data['api_key_encrypted'])
-        api_secret = encryptor.decrypt(api_data['api_secret_encrypted'])
-        
-        # Fetch live positions
-        async with DeltaExchangeAPI(api_key, api_secret) as api:
-            call_pos = await api.get_position_by_symbol(trade['call_symbol'])
-            put_pos = await api.get_position_by_symbol(trade['put_symbol'])
-            
-            # Skip if NEITHER position exists (position expired/closed)
-            if not call_pos and not put_pos:
-                bot_logger.info(f"Position {trade['_id']} has no live data - likely expired")
-                # Mark as closed in database
-                await crud.update_trade_status(db, trade['_id'], 'closed')
-                continue
-            
-            # Calculate total P&L
-            total_pnl = 0
-            
-            if call_pos:
-                total_pnl += float(call_pos.get('unrealized_pnl', 0))
-            
-            if put_pos:
-                total_pnl += float(put_pos.get('unrealized_pnl', 0))
-            
-            # Get strategy for underlying
-            strategy = await crud.get_strategy_by_id(db, trade['strategy_id'])
-            
-            positions_with_pnl.append({
-                '_id': trade['_id'],
-                'underlying': strategy.get('underlying', 'BTC') if strategy else 'BTC',
-                'call_symbol': trade['call_symbol'],
-                'put_symbol': trade['put_symbol'],
-                'pnl': total_pnl,
-                'entry_time': trade.get('entry_time', 'N/A')
-            })
-    
-    # Check if any LIVE positions found
-    if not positions_with_pnl:
-        await update.callback_query.answer()
-        await update.callback_query.edit_message_text(
-            "📈 <b>Open Positions</b>\n\n"
-            "You have no open positions at the moment.\n\n"
-            "<i>Note: Previous positions may have expired.</i>",
+    if not apis:
+        await query.edit_message_text(
+            "❌ No API credentials found.\n\n"
+            "Please add your Delta Exchange API credentials first.",
             parse_mode=ParseMode.HTML,
             reply_markup=get_main_menu_keyboard()
         )
         return
     
-    await update.callback_query.answer()
-    await update.callback_query.edit_message_text(
-        "📈 <b>Open Positions</b>\n\n"
-        "Select a position to view details:",
+    # Fetch positions from each API
+    positions_text = "📈 <b>Open Positions</b>\n\n"
+    total_pnl = 0
+    position_count = 0
+    
+    for idx, api in enumerate(apis, 1):
+        try:
+            # Decrypt credentials
+            api_key = encryptor.decrypt(api['api_key_encrypted'])
+            api_secret = encryptor.decrypt(api['api_secret_encrypted'])
+            
+            # Get positions from Delta Exchange
+            async with DeltaExchangeAPI(api_key, api_secret) as delta_api:
+                positions = await delta_api.get_positions()
+            
+            api_nickname = api.get('nickname', 'Unnamed API')
+            
+            # Filter only positions with size > 0
+            active_positions = [p for p in positions if abs(float(p.get('size', 0))) > 0]
+            
+            if active_positions:
+                positions_text += f"<b>{api_nickname}</b>\n"
+                
+                for pos in active_positions:
+                    product = pos.get('product', {})
+                    symbol = product.get('symbol', 'Unknown')
+                    size = float(pos.get('size', 0))
+                    entry_price = float(pos.get('entry_price', 0))
+                    mark_price = float(product.get('mark_price', 0))
+                    unrealized_pnl = float(pos.get('unrealized_pnl', 0))
+                    
+                    pnl_emoji = "🟢" if unrealized_pnl > 0 else "🔴" if unrealized_pnl < 0 else "⚪"
+                    side_emoji = "🟢 LONG" if size > 0 else "🔴 SHORT"
+                    
+                    total_pnl += unrealized_pnl
+                    position_count += 1
+                    
+                    positions_text += (
+                        f"\n{side_emoji} <b>{symbol}</b>\n"
+                        f"   Size: {abs(size):.0f}\n"
+                        f"   Entry: ${entry_price:.2f}\n"
+                        f"   Mark: ${mark_price:.2f}\n"
+                        f"   {pnl_emoji} P&L: <b>${unrealized_pnl:,.2f}</b>\n"
+                    )
+                
+                positions_text += "\n"
+            
+        except Exception as e:
+            bot_logger.error(f"Error fetching positions for {api.get('nickname')}: {e}")
+            positions_text += f"<b>{api.get('nickname', 'Unnamed API')}</b>\n❌ Error: {str(e)[:50]}\n\n"
+    
+    if position_count == 0:
+        positions_text = "📈 <b>Open Positions</b>\n\nYou have no open positions at the moment."
+    else:
+        # Add summary
+        total_emoji = "🟢" if total_pnl > 0 else "🔴" if total_pnl < 0 else "⚪"
+        positions_text += (
+            f"<b>📊 SUMMARY</b>\n"
+            f"Total Positions: {position_count}\n"
+            f"{total_emoji} Total Unrealized P&L: <b>${total_pnl:,.2f}</b>"
+        )
+    
+    await query.edit_message_text(
+        positions_text,
         parse_mode=ParseMode.HTML,
-        reply_markup=get_position_list_keyboard(positions_with_pnl)
+        reply_markup=get_main_menu_keyboard()
     )
-
 
 async def view_position_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """View detailed position information"""
