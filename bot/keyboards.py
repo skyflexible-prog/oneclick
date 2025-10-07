@@ -70,6 +70,7 @@ def get_strategy_list_keyboard(strategies: List[Dict]) -> InlineKeyboardMarkup:
     """Keyboard showing list of strategies"""
     keyboard = []
     
+    # Add existing strategies
     for strategy in strategies:
         direction_emoji = "📈" if strategy.get('direction') == 'long' else "📉"
         button_text = f"{direction_emoji} {strategy.get('name', 'Unnamed')}"
@@ -77,7 +78,16 @@ def get_strategy_list_keyboard(strategies: List[Dict]) -> InlineKeyboardMarkup:
             InlineKeyboardButton(button_text, callback_data=f"view_strategy_{strategy['_id']}")
         ])
     
-    keyboard.append([InlineKeyboardButton("🔙 Back", callback_data="strategy_menu")])
+    # Add "Create New Strategy" button
+    keyboard.append([
+        InlineKeyboardButton("➕ Create New Strategy", callback_data="create_strategy")
+    ])
+    
+    # Add Back button
+    keyboard.append([
+        InlineKeyboardButton("🔙 Back", callback_data="main_menu")
+    ])
+    
     return InlineKeyboardMarkup(keyboard)
 
 
