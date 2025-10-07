@@ -1254,27 +1254,27 @@ async def execute_trade_preview(update: Update, context: ContextTypes.DEFAULT_TY
 
 <b>🎯 Trade Details:</b>
 <b>Underlying:</b> {strategy['underlying']}
-<b>Spot Price:</b> ₹{spot_price:,.2f}
-<b>ATM Strike:</b> ₹{atm_strike:,.2f}
+<b>Spot Price:</b> ${spot_price:,.2f}
+<b>ATM Strike:</b> ${atm_strike:,.2f}
 
 <b>Call Option:</b> {call_contract['symbol']}
-<b>Call Premium:</b> ₹{call_premium:,.2f}
+<b>Call Premium:</b> ${call_premium:,.2f}
 
 <b>Put Option:</b> {put_contract['symbol']}
-<b>Put Premium:</b> ₹{put_premium:,.2f}
+<b>Put Premium:</b> ${put_premium:,.2f}
 
 <b>💰 Cost Analysis:</b>
-<b>Total Premium:</b> ₹{total_premium:,.2f}
+<b>Total Premium:</b> ${total_premium:,.2f}
 <b>Lot Size:</b> {strategy['lot_size']}
-<b>Total Cost:</b> ₹{total_cost:,.2f}
+<b>Total Cost:</b> ${total_cost:,.2f}
 
 <b>🎯 Risk Management:</b>
-<b>Stop Loss:</b> ₹{targets['stop_loss']:,.2f} (-₹{targets['stop_loss_amount']:,.2f})
-<b>Target:</b> {f"₹{targets.get('target', 0):,.2f}" if targets.get('target') else 'Not Set'}
+<b>Stop Loss:</b> ${targets['stop_loss']:,.2f} (-${targets['stop_loss_amount']:,.2f})
+<b>Target:</b> {f"${targets.get('target', 0):,.2f}" if targets.get('target') else 'Not Set'}
 
 <b>💳 Margin Status:</b> {margin_status}
-<b>Available:</b> ₹{margin_check.get('available', 0):,.2f}
-<b>Required:</b> ₹{margin_check.get('required', 0):,.2f}
+<b>Available:</b> ${margin_check.get('available', 0):,.2f}
+<b>Required:</b> ${margin_check.get('required', 0):,.2f}
 
 ⚠️ <b>Confirm to execute this trade</b>
 """
@@ -1448,8 +1448,8 @@ async def confirm_trade_execution(update: Update, context: ContextTypes.DEFAULT_
    Entry: ₹{result.get('put_price', preview['put_premium']):.2f}
 
 📦 <b>Lot Size:</b> {strategy['lot_size']}
-💰 <b>Total Premium:</b> ₹{total_entry:.2f}
-💵 <b>Total Cost:</b> ₹{total_cost:.2f}{sl_info}{target_info}
+💰 <b>Total Premium:</b> ${total_entry:.2f}
+💵 <b>Total Cost:</b> ${total_cost:.2f}{sl_info}{target_info}
 
 📊 <b>Position Status:</b> OPEN
 🆔 <b>Trade ID:</b> <code>{trade_id}</code>
