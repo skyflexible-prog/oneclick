@@ -137,7 +137,11 @@ def register_handlers():
         entry_points=[CallbackQueryHandler(create_strategy_start, pattern="^create_strategy$")],
         states={
             AWAITING_STRATEGY_NAME: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_strategy_name)
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_strategy_name),
+                # ADD BUTTON HANDLERS HERE INSIDE THE CONVERSATION HANDLER!
+                CallbackQueryHandler(receive_underlying, pattern="^underlying_"),
+                CallbackQueryHandler(receive_direction, pattern="^direction_"),
+                CallbackQueryHandler(receive_expiry, pattern="^expiry_")
             ],
             AWAITING_LOT_SIZE: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_lot_size)
