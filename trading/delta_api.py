@@ -65,28 +65,52 @@ class DeltaExchangeAPI:
             self.session = aiohttp.ClientSession()
         
         url = f"{self.base_url}{endpoint}"
+        
+        # Build query string for signature (sorted alphabetically)
         query_string = ""
-        body = ""
-        
         if params:
-            query_string = "&".join([f"{k}={v}" for k, v in params.items()])
+            # Filter out None values and sort alphabetically
+            filtered_params = {k: v for k, v in params.items() if v is not None}
+            sorted_params = sorted(filtered_params.items())
+            query_string = "&".join([f"{k}={v}" for k, v in sorted_params])
         
+        # Build body for signature
+        body = ""
         if data:
             import json
             body = json.dumps(data)
         
+        # Get headers with correct signature
         headers = self._get_headers(method, endpoint, query_string, body)
         
         try:
             async with self.session.request(
                 method=method,
                 url=url,
-                params=params,
+                params=params,  # aiohttp will URL-encode these
                 json=data,
                 headers=headers,
                 timeout=aiohttp.ClientTimeout(total=settings.api_call_timeout)
             ) as response:
-                response_data = await response.json()
+                # Handle different content types
+                content_type = response.headers.get('Content-Type', '')
+                
+                if 'application/json' in content_type:
+                    response_data = await response.json()
+                elif response.status == 200:
+                    # Some endpoints return empty body on success
+                    text = await response.text()
+                    if text.strip():
+                        try:
+                            response_data = await response.json()
+                        except:
+                            response_data = {'result': text}
+                    else:
+                        response_data = {'result': 'success'}
+                else:
+                    text = await response.text()
+                    api_logger.error(f"Unexpected content type: {content_type}, body: {text}")
+                    return {"error": f"Unexpected content type: {content_type}", "body": text}
                 
                 if response.status == 200:
                     api_logger.info(f"API call successful: {method} {endpoint}")
@@ -110,7 +134,7 @@ class DeltaExchangeAPI:
             return {"error": "Request timeout"}
         
         except Exception as e:
-            api_logger.error(f"Request exception: {str(e)}")
+            api_logger.error(f"Request exception: {str(e)}", exc_info=True)
             return {"error": str(e)}
     
     # ==================== MARKET DATA ENDPOINTS ====================
