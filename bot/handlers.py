@@ -10,6 +10,7 @@ from utils.logger import bot_logger
 from trading.delta_api import DeltaExchangeAPI
 from trading.straddle_logic import StraddleCalculator, StraddleExecutor
 from trading.position_monitor import PositionMonitor
+from bson import ObjectId
 from typing import Dict
 import asyncio
 
