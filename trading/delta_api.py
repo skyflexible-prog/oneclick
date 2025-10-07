@@ -138,34 +138,56 @@ class DeltaExchangeAPI:
     async def get_spot_price(self, underlying: str) -> Optional[float]:
         """Get current spot price for underlying (BTC, ETH)"""
         try:
-            # Get all indices
-            response = await self._make_request('GET', '/v2/indices')
+            symbol_map = {
+                "BTC": ".DEXBTUSD",
+                "ETH": ".DEETHUSD"
+            }
         
+            symbol = symbol_map.get(underlying.upper())
+            if not symbol:
+                api_logger.error(f"Unsupported underlying: {underlying}")
+                return None
+        
+            # Get ticker for index
+            api_logger.info(f"Fetching ticker for {symbol}")
+            response = await self._make_request('GET', f'/v2/tickers/{symbol}')
+        
+            # LOG THE FULL RESPONSE TO SEE STRUCTURE
+            api_logger.info(f"Full response for {symbol}: {response}")
+        
+            if not response:
+                api_logger.error(f"Response is None for {symbol}")
+                return None
+        
+            # Check response type
+            if not isinstance(response, dict):
+                api_logger.error(f"Response is not dict: {type(response)}")
+                return None
+        
+            # Navigate response structure
             if 'result' in response:
-                # Find the index for our underlying
-                if underlying.upper() == "BTC":
-                    index_symbol = ".DEXBTUSD"
-                elif underlying.upper() == "ETH":
-                    index_symbol = ".DEETHUSD"
-                else:
-                    return None
+                result = response['result']
+                api_logger.info(f"Result structure: {result}")
             
-                # Now get ticker for this index
-                ticker_response = await self._make_request('GET', f'/v2/tickers/{index_symbol}')
-            
-                if 'result' in ticker_response:
-                    result = ticker_response['result']
-                
-                    # Get the close price (current index price)
-                    if 'close' in result:
-                        return float(result['close'])
-                    elif 'mark_price' in result:
-                        return float(result['mark_price'])
+                if isinstance(result, dict):
+                    # Try different price fields
+                    for field in ['close', 'mark_price', 'spot_price', 'price', 'last_price']:
+                        if field in result and result[field]:
+                            price = float(result[field])
+                            api_logger.info(f"Got {field} price: {price}")
+                            return price
+                elif isinstance(result, list) and len(result) > 0:
+                    # Response might be a list
+                    ticker = result[0]
+                    for field in ['close', 'mark_price', 'spot_price', 'price']:
+                        if field in ticker and ticker[field]:
+                            return float(ticker[field])
         
+            api_logger.error(f"Could not extract price from response: {response}")
             return None
         
         except Exception as e:
-            api_logger.error(f"Error fetching spot price: {e}")
+            api_logger.error(f"Exception fetching spot price: {str(e)}", exc_info=True)
             return None
     
     async def get_option_chain(self, underlying: str, expiry_date: str = None) -> List[Dict]:
