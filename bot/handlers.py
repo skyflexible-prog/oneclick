@@ -239,6 +239,7 @@ async def show_balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not user_data:
         await query.edit_message_text(
             "❌ User not found. Please use /start first.",
+            parse_mode=ParseMode.HTML,
             reply_markup=get_main_menu_keyboard()
         )
         return
@@ -255,7 +256,7 @@ async def show_balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     
-    # ✅ Fetch balance from each API
+    # Fetch balance from each API
     balance_text = "💰 <b>Account Balances</b>\n\n"
     total_balance = 0
     total_available = 0
@@ -268,21 +269,34 @@ async def show_balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             # Get balance
             async with DeltaExchangeAPI(api_key, api_secret) as delta_api:
-                balance = await delta_api.get_wallet_balance()
+                balance_response = await delta_api.get_wallet_balance()
             
-            available = float(balance.get('available_balance', 0))
-            wallet = float(balance.get('balance', 0))
-            total_balance += wallet
-            total_available += available
-            
-            balance_text += (
-                f"<b>{idx}. {api.get('nickname', 'Unnamed API')}</b>\n"
-                f"   💵 Total: <b>${wallet:,.2f}</b>\n"
-                f"   ✅ Available: <b>${available:,.2f}</b>\n"
-                f"   🔒 In Use: ${(wallet - available):,.2f}\n\n"
-            )
+            # ✅ FIX: Delta Exchange returns balance in 'result' array
+            if 'result' in balance_response and balance_response['result']:
+                # Get the first wallet (usually USDT or INR)
+                wallet_data = balance_response['result'][0]
+                
+                available = float(wallet_data.get('available_balance', 0))
+                wallet = float(wallet_data.get('balance', 0))
+                currency = wallet_data.get('asset_symbol', 'USD')
+                
+                total_balance += wallet
+                total_available += available
+                
+                balance_text += (
+                    f"<b>{idx}. {api.get('nickname', 'Unnamed API')}</b>\n"
+                    f"   💵 Total: <b>${wallet:,.2f} {currency}</b>\n"
+                    f"   ✅ Available: <b>${available:,.2f}</b>\n"
+                    f"   🔒 In Use: ${(wallet - available):,.2f}\n\n"
+                )
+            else:
+                balance_text += (
+                    f"<b>{idx}. {api.get('nickname', 'Unnamed API')}</b>\n"
+                    f"   ❌ No balance data available\n\n"
+                )
             
         except Exception as e:
+            bot_logger.error(f"Error fetching balance for {api.get('nickname')}: {e}")
             balance_text += (
                 f"<b>{idx}. {api.get('nickname', 'Unnamed API')}</b>\n"
                 f"   ❌ Error: {str(e)[:50]}\n\n"
@@ -302,7 +316,7 @@ async def show_balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode=ParseMode.HTML,
         reply_markup=get_main_menu_keyboard()
     )
-    
+
 # ==================== API MANAGEMENT HANDLERS ====================
 
 async def add_api_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
