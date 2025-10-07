@@ -89,43 +89,42 @@ class StraddleCalculator:
             return []
     
     def _get_expiry_date(self, expiry_type: str) -> Optional[str]:
-        """Convert expiry type to date format DD-MM-YYYY"""
+        """
+        Convert expiry type to date format DD-MM-YYYY
+        Uses UTC time (Delta Exchange API standard)
+        For 'daily', returns options expiring soonest (today or tomorrow)
+        """
         try:
-            import pytz
+            from datetime import datetime, timedelta
         
-            # Use IST timezone
-            ist = pytz.timezone('Asia/Kolkata')
-            now = datetime.now(ist)
+            # Use UTC (Delta Exchange standard)
+            now = datetime.utcnow()
         
             if expiry_type.lower() == 'daily':
-                # Daily expiry is at 5:30 PM IST
-                # If current time is before 5:30 PM, use today
-                # If after 5:30 PM, use tomorrow
-                expiry_time = now.replace(hour=17, minute=30, second=0, microsecond=0)
-            
-                if now < expiry_time:
-                    # Before 5:30 PM - use today's expiry
-                    target_date = now
-                else:
-                    # After 5:30 PM - use tomorrow's expiry
-                    target_date = now + timedelta(days=1)
+                # For daily, we'll filter in the next step to get soonest expiring
+                # Return None to fetch all and filter by expiry time
+                return None  # Will filter to get soonest
         
             elif expiry_type.lower() == 'weekly':
-                # Next Friday
-                days_ahead = 4 - now.weekday()
+                # Next Friday (weekly expiry day)
+                days_ahead = 4 - now.weekday()  # Friday is 4
                 if days_ahead <= 0:
                     days_ahead += 7
                 target_date = now + timedelta(days=days_ahead)
         
             elif expiry_type.lower() == 'monthly':
-                # Last Friday of current/next month
+                # Last Friday of current month
+                # Move to next month, go back one day
                 if now.month == 12:
-                    target_date = datetime(now.year + 1, 1, 1, tzinfo=ist)
+                    target_date = datetime(now.year + 1, 1, 1)
                 else:
-                    target_date = datetime(now.year, now.month + 1, 1, tzinfo=ist)
+                    target_date = datetime(now.year, now.month + 1, 1)
+                # Find last Friday
                 target_date = target_date - timedelta(days=1)
+                while target_date.weekday() != 4:  # 4 = Friday
+                    target_date = target_date - timedelta(days=1)
             else:
-                return 'all'
+                return None  # Return None to fetch all
         
             # Format as DD-MM-YYYY
             return target_date.strftime('%d-%m-%Y')
