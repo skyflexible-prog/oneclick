@@ -244,7 +244,7 @@ async def show_balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     # Get all API credentials for this user
-    apis = await crud.get_user_apis(db, user_data['_id'])
+    apis = await crud.get_user_api_credentials(db, user_data['_id'])
     
     if not apis:
         await query.edit_message_text(
