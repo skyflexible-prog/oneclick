@@ -41,6 +41,7 @@ from bot.handlers import (
     view_strategy_details,   # ADD THIS if not there
     delete_strategy,         # ADD THIS if not there
     trade_menu,
+    select_api_for_trade,
     execute_trade_preview,
     confirm_trade_execution,
     show_positions,
@@ -59,6 +60,9 @@ from bot.handlers import (
     AWAITING_TARGET,
     AWAITING_MAX_CAPITAL,
     AWAITING_STRIKE_OFFSET
+    SELECTING_API,                  # ← ADD THIS
+    SELECTING_STRATEGY,             # ← ADD THIS
+    CONFIRMING_TRADE                # ← ADD THIS
 )
 from utils.logger import bot_logger, trade_logger
 
@@ -186,10 +190,31 @@ def register_handlers():
     ptb.add_handler(CallbackQueryHandler(view_strategy_details, pattern="^view_strategy_"))
     ptb.add_handler(CallbackQueryHandler(delete_strategy, pattern="^delete_strategy_"))
     
-    # Trade execution
-    ptb.add_handler(CallbackQueryHandler(trade_menu, pattern="^trade$"))
-    ptb.add_handler(CallbackQueryHandler(execute_trade_preview, pattern="^execute_"))
-    ptb.add_handler(CallbackQueryHandler(confirm_trade_execution, pattern="^confirm_trade_"))
+    # ==================== TRADE CONVERSATION HANDLER ====================
+    
+    trade_conv_handler = ConversationHandler(
+        entry_points=[
+            CallbackQueryHandler(trade_menu, pattern="^trade$")
+        ],
+        states={
+            SELECTING_API: [
+                CallbackQueryHandler(select_api_for_trade, pattern="^trade_api_")
+            ],
+            SELECTING_STRATEGY: [
+                CallbackQueryHandler(execute_trade_preview, pattern="^execute_")
+            ],
+            CONFIRMING_TRADE: [
+                CallbackQueryHandler(confirm_trade_execution, pattern="^confirm_trade")
+            ],
+        },
+        fallbacks=[
+            CallbackQueryHandler(cancel_conversation, pattern="^main_menu$"),
+            CommandHandler("cancel", cancel_conversation)
+        ],
+        per_message=False,
+        allow_reentry=True
+    )
+    ptb.add_handler(trade_conv_handler)
     
     # Position management
     ptb.add_handler(CallbackQueryHandler(show_positions, pattern="^positions$"))
