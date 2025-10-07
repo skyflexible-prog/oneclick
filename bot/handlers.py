@@ -857,31 +857,77 @@ async def delete_strategy(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ==================== TRADE EXECUTION HANDLERS ====================
 
 async def trade_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show trade execution menu"""
+    """Show trade menu - Step 1: Select API"""
+    query = update.callback_query
+    await query.answer()
+    
     user = update.effective_user
     db = Database.get_database()
     
+    # Get user's API credentials
+    user_data = await crud.get_user_by_telegram_id(db, user.id)
+    apis = await crud.get_user_api_credentials(db, user_data['_id'])
+    
+    if not apis:
+        await query.edit_message_text(
+            "⚠️ <b>No API Credentials</b>\n\n"
+            "Please add your Delta Exchange API credentials first.\n\n"
+            "Go to <b>APIs</b> → <b>Add New API</b>",
+            parse_mode=ParseMode.HTML,
+            reply_markup=get_main_menu_keyboard()
+        )
+        return ConversationHandler.END
+    
+    # Show API selection
+    await query.edit_message_text(
+        "📊 <b>Execute Trade</b>\n\n"
+        "Select which API to use for this trade:",
+        parse_mode=ParseMode.HTML,
+        reply_markup=get_api_selection_keyboard(apis)
+    )
+    
+    return SELECTING_API
+
+
+async def select_api_for_trade(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """After API selection, show strategies"""
+    query = update.callback_query
+    await query.answer()
+    
+    # Extract API ID from callback data: trade_api_{api_id}
+    api_id = query.data.split('_')[-1]
+    context.user_data['selected_api_id'] = api_id
+    
+    user = update.effective_user
+    db = Database.get_database()
+    
+    # Get user's strategies
     user_data = await crud.get_user_by_telegram_id(db, user.id)
     strategies = await crud.get_user_strategies(db, user_data['_id'])
     
     if not strategies:
-        await update.callback_query.answer()
-        await update.callback_query.edit_message_text(
-            "📊 <b>Execute Trade</b>\n\n"
-            "You need to create a strategy first before trading.",
+        await query.edit_message_text(
+            "⚠️ <b>No Strategies</b>\n\n"
+            "Please create a trading strategy first.\n\n"
+            "Go to <b>Strategies</b> → <b>Create New Strategy</b>",
             parse_mode=ParseMode.HTML,
-            reply_markup=get_strategy_management_keyboard()
+            reply_markup=get_main_menu_keyboard()
         )
-        return
+        return ConversationHandler.END
     
-    await update.callback_query.answer()
-    await update.callback_query.edit_message_text(
-        "📊 <b>Execute Trade</b>\n\n"
-        "Select a strategy to execute:",
+    # Get API details for display
+    api_data = await crud.get_api_credential_by_id(db, ObjectId(api_id))
+    
+    # Show strategy selection
+    await query.edit_message_text(
+        f"📊 <b>Execute Trade</b>\n\n"
+        f"🔑 <b>Selected API:</b> {api_data.get('nickname', 'Unnamed')}\n\n"
+        f"Select a strategy to execute:",
         parse_mode=ParseMode.HTML,
-        reply_markup=get_trade_execution_keyboard(strategies)
+        reply_markup=get_strategy_execution_keyboard(strategies)
     )
-
+    
+    return SELECTING_STRATEGY
 
 async def execute_trade_preview(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show trade preview and confirmation"""
