@@ -83,66 +83,108 @@ class StraddleCalculator:
             trade_logger.error(f"Error fetching option chain: {e}", exc_info=True)
             return []
 
-    def _filter_soonest_expiring(self, options: List[Dict]) -> List[Dict]:
+    def _filter_by_expiry_type(self, options: List[Dict], expiry_type: str) -> List[Dict]:
         """
-        Filter options to get those expiring soonest (for daily expiry)
-        Uses DATE comparison to avoid timezone parsing issues
+        Filter options by expiry type: daily, weekly, or monthly
+        Extracts expiry date from symbol: C-BTC-123600-081025 -> 08/10/25
         """
         try:
             from datetime import datetime, timedelta
         
-            now = datetime.utcnow()
-            today_date = now.date()
-            tomorrow_date = (now + timedelta(days=1)).date()
+            today = datetime.utcnow()
         
-            trade_logger.info(f"Current UTC time: {now}")
-            trade_logger.info(f"Today: {today_date}, Tomorrow: {tomorrow_date}")
-        
-            # Group options by expiry date
-            options_by_date = {}
+            # Extract all unique expiries from symbols
+            expiry_dates = {}  # {expiry_str: date_obj}
         
             for option in options:
-                settlement_time_str = option.get('settlement_time')
-                if not settlement_time_str:
-                    continue
+                symbol = option.get('symbol', '')
+                parts = symbol.split('-')
             
-                try:
-                    # Parse just the date part (first 10 characters: YYYY-MM-DD)
-                    # Example: "2025-10-07T12:00:00Z" -> "2025-10-07"
-                    date_str = settlement_time_str[:10]
-                    expiry_date = datetime.strptime(date_str, '%Y-%m-%d').date()
-                
-                    # Group by date
-                    if expiry_date not in options_by_date:
-                        options_by_date[expiry_date] = []
-                    options_by_date[expiry_date].append(option)
-                
-                except Exception as e:
-                    trade_logger.warning(f"Error parsing date from '{settlement_time_str}': {e}")
-                    continue
+                if len(parts) >= 4:
+                    expiry_str = parts[-1]  # "081025"
+                    
+                    try:
+                        # Parse DDMMYY format
+                        expiry_date = datetime.strptime(expiry_str, '%d%m%y').date()
+                        expiry_dates[expiry_str] = expiry_date
+                    except:
+                        continue
             
-            trade_logger.info(f"Found options for dates: {sorted(options_by_date.keys())}")
+            if not expiry_dates:
+                trade_logger.error("No valid expiry dates found in symbols")
+                return []
+            
+            trade_logger.info(f"Available expiries: {sorted(expiry_dates.items(), key=lambda x: x[1])[:10]}")
         
-            if not options_by_date:
-                trade_logger.error("No options with valid settlement dates found!")
+            # Filter based on expiry type
+            target_expiry_str = None
+        
+            if expiry_type.lower() == 'daily':
+                # Get today's expiry
+                today_str = today.strftime('%d%m%y')
+            
+                if today_str in expiry_dates:
+                    target_expiry_str = today_str
+                    trade_logger.info(f"✅ Using TODAY's expiry: {today_str} ({expiry_dates[today_str]})")
+                else:
+                    # Use nearest future expiry (next day)
+                    future_expiries = {k: v for k, v in expiry_dates.items() if v >= today.date()}
+                    if future_expiries:
+                        target_expiry_str = min(future_expiries.items(), key=lambda x: x[1])[0]
+                        trade_logger.info(f"⚠️ No today expiry, using nearest: {target_expiry_str} ({expiry_dates[target_expiry_str]})")
+            
+            elif expiry_type.lower() == 'weekly':
+                # Get this week's Friday expiry (or nearest)
+                days_to_friday = (4 - today.weekday()) % 7
+                if days_to_friday == 0 and today.hour >= 12:  # After Friday noon UTC
+                    days_to_friday = 7
+            
+                target_date = (today + timedelta(days=days_to_friday)).date()
+            
+                # Find closest match
+                closest = min(expiry_dates.items(), 
+                             key=lambda x: abs((x[1] - target_date).days))
+                target_expiry_str = closest[0]
+                trade_logger.info(f"✅ Using WEEKLY expiry: {target_expiry_str} ({expiry_dates[target_expiry_str]})")
+        
+            elif expiry_type.lower() == 'monthly':
+                # Get last Friday of current month (or nearest)
+                year = today.year
+                month = today.month
+            
+                # Get last day of month
+                if month == 12:
+                    next_month = datetime(year + 1, 1, 1)
+                else:
+                    next_month = datetime(year, month + 1, 1)
+            
+                last_day = (next_month - timedelta(days=1)).date()
+            
+                # Find last Friday
+                while last_day.weekday() != 4:  # 4 = Friday
+                    last_day -= timedelta(days=1)
+            
+                # Find closest match
+                closest = min(expiry_dates.items(), 
+                             key=lambda x: abs((x[1] - last_day).days))
+                target_expiry_str = closest[0]
+                trade_logger.info(f"✅ Using MONTHLY expiry: {target_expiry_str} ({expiry_dates[target_expiry_str]})")
+        
+            else:
+                trade_logger.error(f"Unknown expiry type: {expiry_type}")
                 return []
         
-            # Find options expiring today or tomorrow (daily expiry)
-            if today_date in options_by_date:
-                trade_logger.info(f"✅ Using TODAY's expiry: {today_date} ({len(options_by_date[today_date])} options)")
-                return options_by_date[today_date]
-            elif tomorrow_date in options_by_date:
-                trade_logger.info(f"✅ Using TOMORROW's expiry: {tomorrow_date} ({len(options_by_date[tomorrow_date])} options)")
-                return options_by_date[tomorrow_date]
-            else:
-                # Get soonest available
-                soonest_date = min(d for d in options_by_date.keys() if d >= today_date)
-                trade_logger.info(f"⚠️ Using soonest available expiry: {soonest_date} ({len(options_by_date[soonest_date])} options)")
-                return options_by_date[soonest_date]
+            # Filter options by target expiry
+            if target_expiry_str:
+                filtered = [o for o in options if target_expiry_str in o.get('symbol', '')]
+                trade_logger.info(f"Found {len(filtered)} options for expiry {target_expiry_str}")
+                return filtered
+        
+            return []
         
         except Exception as e:
-            trade_logger.error(f"Error filtering soonest expiring: {e}", exc_info=True)
-            return []  # Return empty instead of all to avoid wrong trades
+            trade_logger.error(f"Error filtering by expiry type: {e}", exc_info=True)
+            return []
 
     def _get_expiry_date(self, expiry_type: str) -> Optional[str]:
         """
