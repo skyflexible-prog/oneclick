@@ -443,7 +443,7 @@ class StraddleExecutor:
                 call_sl_order = await self.api.place_order(
                     symbol=call_symbol,
                     side='sell',
-                    order_type='stop_limit_order',
+                    order_type='limit_order',
                     size=lot_size,
                     limit_price=call_sl_limit,
                     stop_price=call_sl_trigger,
@@ -454,7 +454,7 @@ class StraddleExecutor:
                 put_sl_order = await self.api.place_order(
                     symbol=put_symbol,
                     side='sell',
-                    order_type='stop_limit_order',
+                    order_type='limit_order',
                     size=lot_size,
                     limit_price=put_sl_limit,
                     stop_price=put_sl_trigger,
@@ -587,7 +587,7 @@ class StraddleExecutor:
                 call_sl_order = await self.api.place_order(
                     symbol=call_symbol,
                     side='buy',
-                    order_type='stop_limit_order',
+                    order_type='limit_order',
                     size=lot_size,
                     limit_price=call_sl_limit,
                     stop_price=call_sl_trigger,
@@ -597,7 +597,7 @@ class StraddleExecutor:
                 put_sl_order = await self.api.place_order(
                     symbol=put_symbol,
                     side='buy',
-                    order_type='stop_limit_order',
+                    order_type='limit_order',
                     size=lot_size,
                     limit_price=put_sl_limit,
                     stop_price=put_sl_trigger,
