@@ -1129,8 +1129,16 @@ async def confirm_trade_execution(update: Update, context: ContextTypes.DEFAULT_
     db = Database.get_database()
     strategy = await crud.get_strategy_by_id(db, strategy_id)
     
-    # Get API credentials
-    api_data = await crud.get_api_credential_by_id(db, strategy['api_id'])
+    # Get API credentials - use selected API from trade flow
+    selected_api_id = context.user_data.get('selected_api_id')
+
+    if selected_api_id:
+        # Use the API selected during trade menu
+        api_data = await crud.get_api_credential_by_id(db, ObjectId(selected_api_id))
+    else:
+        # Fallback to strategy's default API
+        api_data = await crud.get_api_credential_by_id(db, strategy['api_id'])
+
     api_key = encryptor.decrypt(api_data['api_key_encrypted'])
     api_secret = encryptor.decrypt(api_data['api_secret_encrypted'])
     
@@ -1166,9 +1174,12 @@ async def confirm_trade_execution(update: Update, context: ContextTypes.DEFAULT_
     # Save trade to database
     user_data = await crud.get_user_by_telegram_id(db, user.id)
     
+    # Use selected API or strategy's default
+    actual_api_id = ObjectId(selected_api_id) if selected_api_id else strategy['api_id']
+
     trade_data = {
         'user_id': user_data['_id'],
-        'api_id': strategy['api_id'],
+        'api_id': actual_api_id,
         'strategy_id': strategy_id,
         'call_symbol': preview['call_symbol'],
         'put_symbol': preview['put_symbol'],
