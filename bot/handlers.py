@@ -906,16 +906,19 @@ async def receive_max_capital(update: Update, context: ContextTypes.DEFAULT_TYPE
     is_valid, message, capital = validator.validate_capital(update.message.text)
     if not is_valid:
         await update.message.reply_text(
-            f"❌ {message}\n\nPlease enter a valid capital amount:",
+            f"❌ {message}\n\nPlease enter a valid capital amount or 0 for unlimited:",
             reply_markup=get_cancel_keyboard()
         )
         return AWAITING_MAX_CAPITAL
     
     session['strategy_data']['max_capital'] = capital
     
+    # ✅ Show "Unlimited" if capital is 0
+    capital_display = "<b>Unlimited</b>" if capital == 0 else f"<b>{format_currency(capital)}</b>"
+    
     await update.message.reply_text(
-        f"✅ Max Capital: <b>{format_currency(capital)}</b>\n\n"
-        "Please enter the <b>strike offset</b> from ATM (0 for ATM, +1 for OTM, -1 for ITM):",
+        f"✅ Max Capital: {capital_display}\n\n"
+        "Please enter the <b>strike offset</b> from ATM (0 for ATM, +100 for 100 points OTM, -100 for 100 points ITM):",
         parse_mode=ParseMode.HTML,
         reply_markup=get_cancel_keyboard()
     )
