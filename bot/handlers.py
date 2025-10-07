@@ -152,12 +152,11 @@ Need help? Contact support or check documentation.
 
 
 async def balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show wallet balance for ALL APIs"""
-    user = update.effective_user
-    
+    """Show wallet balance for ALL APIs - Called from /balance command"""
     await update.message.reply_text("🔄 Fetching balances from all APIs...")
     
     db = Database.get_database()
+    user = update.effective_user
     user_data = await crud.get_user_by_telegram_id(db, user.id)
     
     if not user_data:
@@ -226,6 +225,84 @@ async def balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=get_main_menu_keyboard()
     )
 
+async def show_balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show wallet balance for ALL APIs - Called from button click"""
+    query = update.callback_query
+    await query.answer()
+    
+    await query.edit_message_text("🔄 Fetching balances from all APIs...")
+    
+    db = Database.get_database()
+    user = query.from_user
+    user_data = await crud.get_user_by_telegram_id(db, user.id)
+    
+    if not user_data:
+        await query.edit_message_text(
+            "❌ User not found. Please use /start first.",
+            reply_markup=get_main_menu_keyboard()
+        )
+        return
+    
+    # Get all API credentials for this user
+    apis = await crud.get_user_apis(db, user_data['_id'])
+    
+    if not apis:
+        await query.edit_message_text(
+            "❌ No API credentials found.\n\n"
+            "Please add your Delta Exchange API credentials first.",
+            parse_mode=ParseMode.HTML,
+            reply_markup=get_main_menu_keyboard()
+        )
+        return
+    
+    # ✅ Fetch balance from each API
+    balance_text = "💰 <b>Account Balances</b>\n\n"
+    total_balance = 0
+    total_available = 0
+    
+    for idx, api in enumerate(apis, 1):
+        try:
+            # Decrypt credentials
+            api_key = encryptor.decrypt(api['api_key_encrypted'])
+            api_secret = encryptor.decrypt(api['api_secret_encrypted'])
+            
+            # Get balance
+            async with DeltaExchangeAPI(api_key, api_secret) as delta_api:
+                balance = await delta_api.get_wallet_balance()
+            
+            available = float(balance.get('available_balance', 0))
+            wallet = float(balance.get('balance', 0))
+            total_balance += wallet
+            total_available += available
+            
+            balance_text += (
+                f"<b>{idx}. {api.get('nickname', 'Unnamed API')}</b>\n"
+                f"   💵 Total: <b>${wallet:,.2f}</b>\n"
+                f"   ✅ Available: <b>${available:,.2f}</b>\n"
+                f"   🔒 In Use: ${(wallet - available):,.2f}\n\n"
+            )
+            
+        except Exception as e:
+            balance_text += (
+                f"<b>{idx}. {api.get('nickname', 'Unnamed API')}</b>\n"
+                f"   ❌ Error: {str(e)[:50]}\n\n"
+            )
+    
+    # Add totals
+    if total_balance > 0:
+        balance_text += (
+            f"<b>📊 TOTAL ACROSS ALL ACCOUNTS</b>\n"
+            f"💵 Total: <b>${total_balance:,.2f}</b>\n"
+            f"✅ Available: <b>${total_available:,.2f}</b>\n"
+            f"🔒 In Use: ${(total_balance - total_available):,.2f}"
+        )
+    
+    await query.edit_message_text(
+        balance_text,
+        parse_mode=ParseMode.HTML,
+        reply_markup=get_main_menu_keyboard()
+    )
+    
 # ==================== API MANAGEMENT HANDLERS ====================
 
 async def add_api_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
