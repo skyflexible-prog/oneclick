@@ -279,15 +279,24 @@ async def root():
     }
 
 
-@app.get("/health")
-async def health_check():
+# Replace your existing @app.get("/health") with this:
+
+@app.api_route("/health", methods=["GET", "HEAD"])
+async def health_check(request: Request):
     """
-    Lightweight health check endpoint for Uptime Robot / Freshping
-    This endpoint is pinged every 5 minutes to keep the service alive on Render free tier
+    Health check endpoint supporting both GET and HEAD requests
+    - HEAD: Used by UptimeRobot (returns 200 OK only)
+    - GET: Returns full health status
     """
+    # For HEAD requests, just return 200 OK status
+    if request.method == "HEAD":
+        return Response(status_code=200)
+    
+    # For GET requests, return full health data
     return {
         "status": "ok",
-        "timestamp": datetime.utcnow().isoformat()
+        "bot": "healthy",
+        "database": "connected" if Database.client else "disconnected"
     }
 
 
