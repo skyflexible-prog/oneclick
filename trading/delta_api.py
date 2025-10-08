@@ -271,16 +271,35 @@ class DeltaExchangeAPI:
             # Fetch positions for BTC
             btc_params = {'underlying_asset_symbol': 'BTC'}
             btc_response = await self._make_request('GET', '/v2/positions', params=btc_params)
+        
+            # ✅ DEBUG: Log raw API response
+            api_logger.info(f"BTC positions response: {btc_response}")
+        
             if 'result' in btc_response:
                 all_positions.extend(btc_response['result'])
+                # ✅ DEBUG: Log first position structure
+                if btc_response['result']:
+                    api_logger.info(f"Sample BTC position: {btc_response['result'][0]}")
         
             # Fetch positions for ETH
             eth_params = {'underlying_asset_symbol': 'ETH'}
             eth_response = await self._make_request('GET', '/v2/positions', params=eth_params)
+        
+            # ✅ DEBUG: Log raw API response
+            api_logger.info(f"ETH positions response: {eth_response}")
+        
             if 'result' in eth_response:
                 all_positions.extend(eth_response['result'])
+                # ✅ DEBUG: Log first position structure
+                if eth_response['result']:
+                    api_logger.info(f"Sample ETH position: {eth_response['result'][0]}")
         
             api_logger.info(f"Fetched {len(all_positions)} positions (BTC + ETH)")
+        
+            # ✅ DEBUG: Log all positions
+            for idx, pos in enumerate(all_positions):
+                api_logger.info(f"Position {idx}: size={pos.get('size')}, product={pos.get('product')}, keys={list(pos.keys())}")
+        
             return all_positions
     
         except Exception as e:
