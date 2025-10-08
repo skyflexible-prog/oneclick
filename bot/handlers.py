@@ -1629,6 +1629,9 @@ async def show_positions(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             api_nickname = api.get('nickname', 'Unnamed API')
             
+            # ✅ DEBUG: Log raw position data
+            bot_logger.info(f"Raw positions for {api_nickname}: {positions[:2]}")  # Log first 2
+            
             # Filter only positions with size != 0
             active_positions = [p for p in positions if abs(float(p.get('size', 0))) > 0]
             
@@ -1636,21 +1639,51 @@ async def show_positions(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 positions_text += f"<b>📍 {api_nickname}</b>\n"
                 
                 for pos in active_positions:
-                    # ✅ FIX: Delta Exchange returns nested product object
-                    product = pos.get('product', {})
+                    # ✅ DEBUG: Log full position structure
+                    bot_logger.info(f"Position structure: {pos}")
                     
-                    # Get symbol from product
-                    symbol = product.get('symbol', 'Unknown')
+                    # ✅ DEFENSIVE: Try multiple ways to get data
+                    # Method 1: Check if product is a dict
+                    product = pos.get('product', {})
+                    if not isinstance(product, dict):
+                        bot_logger.warning(f"Product is not a dict: {type(product)}")
+                        product = {}
+                    
+                    # Method 2: Try to get symbol from multiple locations
+                    symbol = (
+                        product.get('symbol') or 
+                        pos.get('symbol') or 
+                        pos.get('product_symbol') or
+                        'Unknown'
+                    )
                     
                     # Position details
                     size = float(pos.get('size', 0))
                     entry_price = float(pos.get('entry_price', 0))
                     
-                    # ✅ FIX: Get mark_price from product
-                    mark_price = float(product.get('mark_price', 0))
+                    # ✅ Method 3: Try multiple locations for mark_price
+                    mark_price = 0
+                    if 'mark_price' in pos:
+                        mark_price = float(pos['mark_price'])
+                    elif 'mark_price' in product:
+                        mark_price = float(product['mark_price'])
+                    elif 'marking_price' in pos:  # Alternative field name
+                        mark_price = float(pos['marking_price'])
                     
-                    # ✅ FIX: Get unrealized_pnl from position
+                    bot_logger.info(f"Extracted: symbol={symbol}, entry={entry_price}, mark={mark_price}")
+                    
+                    # ✅ Get unrealized_pnl
                     unrealized_pnl = float(pos.get('unrealized_pnl', 0))
+                    
+                    # If mark_price is still 0, calculate from entry + pnl
+                    if mark_price == 0 and entry_price > 0 and size != 0:
+                        # For SHORT positions: mark = entry - (pnl / size)
+                        # For LONG positions: mark = entry + (pnl / size)
+                        if size < 0:  # SHORT
+                            mark_price = entry_price - (unrealized_pnl / abs(size))
+                        else:  # LONG
+                            mark_price = entry_price + (unrealized_pnl / abs(size))
+                        bot_logger.info(f"Calculated mark_price: {mark_price}")
                     
                     # Determine side and PnL emoji
                     pnl_emoji = "🟢" if unrealized_pnl > 0 else "🔴" if unrealized_pnl < 0 else "⚪"
