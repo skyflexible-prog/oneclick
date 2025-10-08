@@ -329,7 +329,6 @@ class DeltaExchangeAPI:
             api_logger.error(f"Error getting positions: {e}", exc_info=True)
             return []
 
-
     async def get_position_by_symbol(self, symbol: str) -> Optional[Dict]:
         """
         Get position for a specific symbol by filtering all positions
