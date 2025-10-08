@@ -2039,7 +2039,7 @@ View trade history: /history
 # ==================== HISTORY HANDLER ====================
 
 async def show_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show trade history from Delta Exchange API across ALL APIs"""
+    """Show compact trade history grouped by API and Date with overall API summaries"""
     query = update.callback_query
     await query.answer()
     
@@ -2058,6 +2058,9 @@ async def show_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     try:
+        from datetime import datetime
+        from collections import defaultdict
+        
         # Get all API credentials
         apis = await crud.get_user_api_credentials(db, user_data['_id'])
         
@@ -2069,9 +2072,8 @@ async def show_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
         
-        history_text = "📜 <b>Trade History</b>\n\n"
-        total_trades = 0
-        total_pnl = 0.0  # ✅ ADDED: Initialize total_pnl
+        # ✅ Collect trades grouped by API
+        trades_by_api = {}
         
         for api in apis:
             try:
@@ -2083,90 +2085,145 @@ async def show_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
                 # Get order history from Delta Exchange
                 async with DeltaExchangeAPI(api_key, api_secret) as delta_api:
-                    # Fetch order history
-                    history_response = await delta_api.get_order_history(limit=50)
-                    
-                    bot_logger.info(f"Order history for {api_nickname}: {history_response}")
+                    # ✅ Fetch ALL order history (increased limit)
+                    history_response = await delta_api.get_order_history(limit=100)
                     
                     if history_response and 'result' in history_response:
                         orders = history_response['result']
                         
-                        # ✅ FIX: Filter for 'closed' state with actual fills
+                        # Filter for closed orders with fills
                         closed_orders = [
                             o for o in orders 
                             if o.get('state') == 'closed' and o.get('average_fill_price')
                         ]
                         
-                        # ✅ FIXED: Use correct variable name
-                        bot_logger.info(f"Found {len(closed_orders)} closed orders for {api_nickname}")
+                        api_trades = []
                         
-                        if closed_orders:  # ✅ FIXED: Use correct variable
-                            history_text += f"<b>📍 {api_nickname}</b>\n"
+                        for order in closed_orders:
+                            symbol = order.get('product_symbol', 'Unknown')
+                            side = order.get('side', 'buy')
+                            size = float(order.get('size', 0))
+                            unfilled = float(order.get('unfilled_size', 0))
+                            filled_size = size - unfilled
                             
-                            # Show last 10 closed orders for this API
-                            for order in closed_orders[:10]:  # ✅ FIXED: Use correct variable
-                                symbol = order.get('product_symbol', 'Unknown')
-                                side = order.get('side', 'buy')
-                                size = float(order.get('size', 0))
-                                unfilled = float(order.get('unfilled_size', 0))
-                                filled_size = size - unfilled
-                                
-                                avg_price = float(order.get('average_fill_price', 0))
-                                
-                                # ✅ FIX: Use 'paid_commission' (not 'commission')
-                                commission = float(order.get('paid_commission', 0))
-                                
-                                # ✅ ADDED: Get P&L from meta_data
-                                meta_data = order.get('meta_data', {})
-                                pnl = float(meta_data.get('pnl', 0))
-                                
-                                # Get order creation time
-                                created_at = order.get('created_at', '')
-                                if created_at:
-                                    from datetime import datetime
-                                    try:
-                                        order_time = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
-                                        time_str = order_time.strftime('%d %b, %H:%M')
-                                    except:
-                                        time_str = created_at[:16]
-                                else:
-                                    time_str = 'N/A'
-                                
-                                side_emoji = "🟢" if side == 'buy' else "🔴"
-                                side_text = "BUY" if side == 'buy' else "SELL"
-                                pnl_emoji = "🟢" if pnl > 0 else "🔴" if pnl < 0 else "⚪"
-                                
-                                history_text += (
-                                    f"\n{side_emoji} <b>{side_text} {symbol}</b>\n"
-                                    f"   Size: {filled_size:.0f}\n"
-                                    f"   Price: ${avg_price:.2f}\n"
-                                    f"   {pnl_emoji} P&L: ${pnl:.4f}\n"
-                                    f"   Commission: ${commission:.4f}\n"
-                                    f"   Time: {time_str}\n"
-                                )
-                                
-                                total_trades += 1
-                                total_pnl += pnl  # ✅ ADDED: Track total P&L
+                            avg_price = float(order.get('average_fill_price', 0))
+                            commission = float(order.get('paid_commission', 0))
                             
-                            history_text += "\n"
-                        else:
-                            history_text += f"<b>📍 {api_nickname}</b>\nNo closed orders found.\n\n"
-                    else:
-                        history_text += f"<b>📍 {api_nickname}</b>\n❌ Unable to fetch history\n\n"
+                            # Get P&L from meta_data
+                            meta_data = order.get('meta_data', {})
+                            pnl = float(meta_data.get('pnl', 0))
+                            
+                            # Get order creation time
+                            created_at = order.get('created_at', '')
+                            if created_at:
+                                try:
+                                    order_time = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+                                except:
+                                    order_time = None
+                            else:
+                                order_time = None
+                            
+                            api_trades.append({
+                                'symbol': symbol,
+                                'side': side,
+                                'size': filled_size,
+                                'price': avg_price,
+                                'pnl': pnl,
+                                'commission': commission,
+                                'time': order_time
+                            })
+                        
+                        if api_trades:
+                            trades_by_api[api_nickname] = api_trades
                         
             except Exception as api_error:
-                bot_logger.error(f"Error fetching history for {api.get('nickname')}: {api_error}", exc_info=True)
-                history_text += f"<b>📍 {api.get('nickname', 'Unnamed API')}</b>\n❌ Error: {str(api_error)[:50]}\n\n"
+                bot_logger.error(f"Error fetching history for {api.get('nickname')}: {api_error}")
         
-        if total_trades == 0:
-            history_text = "📜 <b>Trade History</b>\n\nNo closed trades found."
-        else:
-            pnl_emoji = "🟢" if total_pnl > 0 else "🔴" if total_pnl < 0 else "⚪"
-            history_text += (
-                f"<b>📊 SUMMARY</b>\n"
-                f"Total Filled Orders: {total_trades}\n"
-                f"{pnl_emoji} Total P&L: <b>${total_pnl:.4f}</b>"
+        if not trades_by_api:
+            await query.edit_message_text(
+                "📜 <b>Trade History</b>\n\nNo closed trades found.",
+                parse_mode=ParseMode.HTML,
+                reply_markup=get_main_menu_keyboard()
             )
+            return
+        
+        # ✅ Build compact history text grouped by API and Date
+        history_text = "📜 <b>Trade History</b>\n\n"
+        
+        overall_trades = 0
+        overall_pnl = 0.0
+        overall_commission = 0.0
+        
+        # Loop through each API
+        for api_nickname, api_trades in trades_by_api.items():
+            history_text += f"<b>🔑 {api_nickname}</b>\n"
+            
+            # ✅ Calculate OVERALL API stats (ALL trades)
+            api_all_trades_count = len(api_trades)
+            api_all_pnl = sum(t['pnl'] for t in api_trades)
+            api_all_commission = sum(t['commission'] for t in api_trades)
+            api_all_net = api_all_pnl - api_all_commission
+            
+            # Group trades by date for this API
+            trades_by_date = defaultdict(list)
+            
+            for trade in api_trades:
+                if trade['time']:
+                    date_key = trade['time'].strftime('%d %b')
+                else:
+                    date_key = 'Unknown'
+                trades_by_date[date_key].append(trade)
+            
+            # Sort dates (newest first)
+            sorted_dates = sorted(
+                trades_by_date.keys(),
+                key=lambda d: datetime.strptime(d + ' 2025', '%d %b %Y') if d != 'Unknown' else datetime.min,
+                reverse=True
+            )
+            
+            # Show last 10 days per API (for recent activity view)
+            for date_key in sorted_dates[:10]:
+                date_trades = trades_by_date[date_key]
+                
+                # Calculate daily totals
+                daily_pnl = sum(t['pnl'] for t in date_trades)
+                daily_commission = sum(t['commission'] for t in date_trades)
+                trade_count = len(date_trades)
+                
+                pnl_emoji = "🟢" if daily_pnl > 0 else "🔴" if daily_pnl < 0 else "⚪"
+                
+                history_text += (
+                    f"   📅 {date_key}: {pnl_emoji} {trade_count} trades | "
+                    f"P&L ${daily_pnl:.2f} | Comm ${daily_commission:.2f}\n"
+                )
+            
+            # ✅ Show if there are more days not displayed
+            if len(sorted_dates) > 10:
+                history_text += f"   ... +{len(sorted_dates) - 10} more days\n"
+            
+            # ✅ API OVERALL Summary (ALL trades on this API)
+            api_net_emoji = "🟢" if api_all_net > 0 else "🔴" if api_all_net < 0 else "⚪"
+            history_text += (
+                f"   {api_net_emoji} <b>API OVERALL:</b> {api_all_trades_count} trades | "
+                f"Gross ${api_all_pnl:.2f} | Comm ${api_all_commission:.2f} | "
+                f"Net <b>${api_all_net:.2f}</b>\n\n"
+            )
+            
+            overall_trades += api_all_trades_count
+            overall_pnl += api_all_pnl
+            overall_commission += api_all_commission
+        
+        # ✅ GLOBAL Overall Summary (all APIs combined)
+        net_profit = overall_pnl - overall_commission
+        net_emoji = "🟢" if net_profit > 0 else "🔴" if net_profit < 0 else "⚪"
+        
+        history_text += (
+            f"<b>📊 GLOBAL SUMMARY (All APIs)</b>\n"
+            f"Total Orders: {overall_trades}\n"
+            f"Gross P&L: ${overall_pnl:.2f}\n"
+            f"Total Commission: ${overall_commission:.2f}\n"
+            f"{net_emoji} Net Profit: <b>${net_profit:.2f}</b>"
+        )
         
         await query.edit_message_text(
             history_text,
