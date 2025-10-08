@@ -2071,7 +2071,7 @@ async def show_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         history_text = "📜 <b>Trade History</b>\n\n"
         total_trades = 0
-        all_fills = []
+        total_pnl = 0.0  # ✅ ADDED: Initialize total_pnl
         
         for api in apis:
             try:
@@ -2083,7 +2083,7 @@ async def show_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
                 # Get order history from Delta Exchange
                 async with DeltaExchangeAPI(api_key, api_secret) as delta_api:
-                    # Fetch order history (filled orders)
+                    # Fetch order history
                     history_response = await delta_api.get_order_history(limit=50)
                     
                     bot_logger.info(f"Order history for {api_nickname}: {history_response}")
@@ -2091,20 +2091,20 @@ async def show_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     if history_response and 'result' in history_response:
                         orders = history_response['result']
                         
-                        # ✅ FIX: Filter for 'closed' state (not 'filled')
-                        # Also only show orders with actual fills (average_fill_price exists)
+                        # ✅ FIX: Filter for 'closed' state with actual fills
                         closed_orders = [
                             o for o in orders 
                             if o.get('state') == 'closed' and o.get('average_fill_price')
                         ]
                         
-                        bot_logger.info(f"Found {len(filled_orders)} filled orders for {api_nickname}")
+                        # ✅ FIXED: Use correct variable name
+                        bot_logger.info(f"Found {len(closed_orders)} closed orders for {api_nickname}")
                         
-                        if filled_orders:
+                        if closed_orders:  # ✅ FIXED: Use correct variable
                             history_text += f"<b>📍 {api_nickname}</b>\n"
                             
-                            # Show last 10 filled orders for this API
-                            for order in filled_orders[:10]:
+                            # Show last 10 closed orders for this API
+                            for order in closed_orders[:10]:  # ✅ FIXED: Use correct variable
                                 symbol = order.get('product_symbol', 'Unknown')
                                 side = order.get('side', 'buy')
                                 size = float(order.get('size', 0))
@@ -2112,7 +2112,13 @@ async def show_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                 filled_size = size - unfilled
                                 
                                 avg_price = float(order.get('average_fill_price', 0))
-                                commission = float(order.get('commission', 0))
+                                
+                                # ✅ FIX: Use 'paid_commission' (not 'commission')
+                                commission = float(order.get('paid_commission', 0))
+                                
+                                # ✅ ADDED: Get P&L from meta_data
+                                meta_data = order.get('meta_data', {})
+                                pnl = float(meta_data.get('pnl', 0))
                                 
                                 # Get order creation time
                                 created_at = order.get('created_at', '')
@@ -2128,28 +2134,23 @@ async def show_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                 
                                 side_emoji = "🟢" if side == 'buy' else "🔴"
                                 side_text = "BUY" if side == 'buy' else "SELL"
+                                pnl_emoji = "🟢" if pnl > 0 else "🔴" if pnl < 0 else "⚪"
                                 
                                 history_text += (
                                     f"\n{side_emoji} <b>{side_text} {symbol}</b>\n"
                                     f"   Size: {filled_size:.0f}\n"
                                     f"   Price: ${avg_price:.2f}\n"
+                                    f"   {pnl_emoji} P&L: ${pnl:.4f}\n"
                                     f"   Commission: ${commission:.4f}\n"
                                     f"   Time: {time_str}\n"
                                 )
                                 
                                 total_trades += 1
-                                all_fills.append({
-                                    'symbol': symbol,
-                                    'side': side,
-                                    'size': filled_size,
-                                    'price': avg_price,
-                                    'commission': commission,
-                                    'time': time_str
-                                })
+                                total_pnl += pnl  # ✅ ADDED: Track total P&L
                             
                             history_text += "\n"
                         else:
-                            history_text += f"<b>📍 {api_nickname}</b>\nNo filled orders found.\n\n"
+                            history_text += f"<b>📍 {api_nickname}</b>\nNo closed orders found.\n\n"
                     else:
                         history_text += f"<b>📍 {api_nickname}</b>\n❌ Unable to fetch history\n\n"
                         
