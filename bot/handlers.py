@@ -2091,10 +2091,11 @@ async def show_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     if history_response and 'result' in history_response:
                         orders = history_response['result']
                         
-                        # Filter only filled orders
-                        filled_orders = [
+                        # ✅ FIX: Filter for 'closed' state (not 'filled')
+                        # Also only show orders with actual fills (average_fill_price exists)
+                        closed_orders = [
                             o for o in orders 
-                            if o.get('state') == 'filled'
+                            if o.get('state') == 'closed' and o.get('average_fill_price')
                         ]
                         
                         bot_logger.info(f"Found {len(filled_orders)} filled orders for {api_nickname}")
@@ -2159,7 +2160,12 @@ async def show_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if total_trades == 0:
             history_text = "📜 <b>Trade History</b>\n\nNo closed trades found."
         else:
-            history_text += f"<b>📊 SUMMARY</b>\nTotal Filled Orders: {total_trades}"
+            pnl_emoji = "🟢" if total_pnl > 0 else "🔴" if total_pnl < 0 else "⚪"
+            history_text += (
+                f"<b>📊 SUMMARY</b>\n"
+                f"Total Filled Orders: {total_trades}\n"
+                f"{pnl_emoji} Total P&L: <b>${total_pnl:.4f}</b>"
+            )
         
         await query.edit_message_text(
             history_text,
