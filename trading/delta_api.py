@@ -180,6 +180,29 @@ class DeltaExchangeAPI:
         
         return await self._make_request('GET', endpoint)
     
+    async def get_ticker_by_symbol(self, symbol: str) -> Optional[Dict]:
+        """
+        Get real-time ticker data for a specific symbol
+    
+        Args:
+            symbol: Product symbol (e.g., 'C-BTC-122000-081025')
+    
+        Returns:
+            Ticker data dict with mark_price, close, etc. or None
+        """
+        try:
+            response = await self.get_tickers(symbol)
+        
+            if response and 'result' in response:
+                return response['result']
+        
+            api_logger.warning(f"No ticker data for {symbol}")
+            return None
+        
+        except Exception as e:
+            api_logger.error(f"Error fetching ticker for {symbol}: {e}")
+            return None
+    
     async def get_orderbook(self, symbol: str) -> Dict:
         """Get orderbook for a symbol"""
         return await self._make_request('GET', f'/v2/l2orderbook/{symbol}')
