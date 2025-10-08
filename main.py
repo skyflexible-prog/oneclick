@@ -281,12 +281,43 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint for Uptime Robot / Freshping"""
+    """
+    Lightweight health check endpoint for Uptime Robot / Freshping
+    This endpoint is pinged every 5 minutes to keep the service alive on Render free tier
+    """
     return {
         "status": "ok",
-        "bot": "healthy",
-        "database": "connected" if Database.client else "disconnected"
+        "timestamp": datetime.utcnow().isoformat()
     }
+
+
+@app.get("/healthz")
+async def detailed_health():
+    """
+    Detailed health check with database and bot status
+    Use this for debugging, not for uptime monitoring (to save resources)
+    """
+    try:
+        # Check database connection
+        db_status = "connected" if Database.client else "disconnected"
+        
+        # Check if bot is initialized
+        bot_status = "running" if ptb else "not_initialized"
+        
+        return {
+            "status": "healthy",
+            "bot": bot_status,
+            "database": db_status,
+            "timestamp": datetime.utcnow().isoformat(),
+            "service": "telegram-straddle-bot"
+        }
+    except Exception as e:
+        bot_logger.error(f"Health check failed: {e}")
+        return {
+            "status": "unhealthy",
+            "error": str(e),
+            "timestamp": datetime.utcnow().isoformat()
+        }
 
 
 @app.get("/stats")
