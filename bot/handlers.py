@@ -1348,11 +1348,26 @@ async def execute_trade_preview(update: Update, context: ContextTypes.DEFAULT_TY
                 )
                 return ConversationHandler.END
             
+            # ✅ FIX: Get contract size for display calculations
+            call_contract_size = float(call_contract.get('contract_value', 0.001))
+            put_contract_size = float(put_contract.get('contract_value', 0.001))
+            
+            bot_logger.info(f"Contract sizes - Call: {call_contract_size} BTC, Put: {put_contract_size} BTC")
+            
+            # Calculate premiums
             total_premium = call_premium + put_premium
             lot_size = strategy.get('lot_size', 1)
-            total_cost = total_premium * lot_size
             
-            # Calculate SL and Target
+            # ✅ IMPORTANT: Two different calculations
+            # 1. total_cost_notional: For display only (actual USD cost)
+            # 2. lot_size: Keep original for order execution
+            total_cost_notional = (call_premium * call_contract_size + put_premium * put_contract_size) * lot_size
+            
+            bot_logger.info(f"Premium per BTC: ${total_premium:.2f}")
+            bot_logger.info(f"Lot size: {lot_size}")
+            bot_logger.info(f"Total cost (notional): ${total_cost_notional:.2f}")
+            
+            # Calculate SL and Target based on NOTIONAL cost
             stop_loss_pct = strategy.get('stop_loss_pct', 0)
             target_pct = strategy.get('target_pct')
             
@@ -1363,12 +1378,12 @@ async def execute_trade_preview(update: Update, context: ContextTypes.DEFAULT_TY
             if stop_loss_pct > 0:
                 if strategy['direction'] == 'long':
                     # Long: Loss when premium decreases
-                    stop_loss_amount = total_premium * (stop_loss_pct / 100)
-                    stop_loss_value = total_premium - stop_loss_amount
+                    stop_loss_amount = total_cost_notional * (stop_loss_pct / 100)
+                    stop_loss_value = total_cost_notional - stop_loss_amount
                 else:
                     # Short: Loss when premium increases
-                    stop_loss_amount = total_premium * (stop_loss_pct / 100)
-                    stop_loss_value = total_premium + stop_loss_amount
+                    stop_loss_amount = total_cost_notional * (stop_loss_pct / 100)
+                    stop_loss_value = total_cost_notional + stop_loss_amount
             
             # Calculate target
             target_value = 0
@@ -1377,14 +1392,14 @@ async def execute_trade_preview(update: Update, context: ContextTypes.DEFAULT_TY
             if target_pct and target_pct > 0:
                 if strategy['direction'] == 'long':
                     # Long: Profit when premium increases
-                    target_amount = total_premium * (target_pct / 100)
-                    target_value = total_premium + target_amount
+                    target_amount = total_cost_notional * (target_pct / 100)
+                    target_value = total_cost_notional + target_amount
                 else:
                     # Short: Profit when premium decreases
-                    target_amount = total_premium * (target_pct / 100)
-                    target_value = total_premium - target_amount
+                    target_amount = total_cost_notional * (target_pct / 100)
+                    target_value = total_cost_notional - target_amount
             
-            # ✅ FIXED: Get available balance in USD/USDT format
+            # ✅ Get available balance in USD/USDT format
             balance_response = await api.get_wallet_balance()
             available_balance = 0.0
             
@@ -1405,19 +1420,19 @@ async def execute_trade_preview(update: Update, context: ContextTypes.DEFAULT_TY
                         bot_logger.info(f"✅ Found balance: ${available_balance} in {asset_symbol or 'USD'}")
                         break
             
-            # ✅ FIXED: Calculate margin requirement
-            # For LONG straddle: need to pay premium
-            # For SHORT straddle: receive premium but need margin for potential loss
+            # ✅ Calculate margin requirement based on NOTIONAL cost
             if strategy['direction'] == 'long':
-                required_margin = total_cost
+                required_margin = total_cost_notional
             else:
-                # For short positions, approximate margin as 2x premium
-                required_margin = total_cost * 2
+                # For short positions, approximate margin as 2x notional
+                required_margin = total_cost_notional * 2
+            
+            bot_logger.info(f"Margin: available=${available_balance}, required=${required_margin}")
             
             # Check if sufficient balance
             margin_sufficient = available_balance >= required_margin
         
-        # Store trade preview data in session
+        # ✅ CRITICAL: Store ORIGINAL lot_size for execution (not adjusted)
         session = get_user_session(user.id)
         session['trade_preview'] = {
             'strategy_id': strategy_id,
@@ -1429,8 +1444,8 @@ async def execute_trade_preview(update: Update, context: ContextTypes.DEFAULT_TY
             'call_premium': call_premium,
             'put_premium': put_premium,
             'total_premium': total_premium,
-            'total_cost': total_cost,
-            'lot_size': lot_size
+            'lot_size': lot_size,  # ✅ Original lot_size for execution
+            'contract_size': call_contract_size  # Store for reference
         }
         
         direction_text = "📈 BUY" if strategy['direction'] == 'long' else "📉 SELL"
@@ -1450,15 +1465,17 @@ async def execute_trade_preview(update: Update, context: ContextTypes.DEFAULT_TY
 <b>ATM Strike:</b> ${atm_strike:,.2f}
 
 <b>Call Option:</b> {call_contract['symbol']}
-<b>Call Premium:</b> ${call_premium:.2f}
+<b>Call Premium:</b> ${call_premium:.2f}/BTC
+<b>Contract Size:</b> {call_contract_size} BTC
 
 <b>Put Option:</b> {put_contract['symbol']}
-<b>Put Premium:</b> ${put_premium:.2f}
+<b>Put Premium:</b> ${put_premium:.2f}/BTC
+<b>Contract Size:</b> {put_contract_size} BTC
 
 <b>💵 Cost Analysis:</b>
-<b>Total Premium:</b> ${total_premium:.2f}
-<b>Lot Size:</b> {lot_size}
-<b>Total Cost:</b> ${total_cost:.2f}
+<b>Premium per BTC:</b> ${total_premium:.2f}
+<b>Lot Size:</b> {lot_size} lot(s)
+<b>Total Cost:</b> ${total_cost_notional:.2f}
 
 <b>🎯 Risk Management:</b>
 <b>Stop Loss:</b> {f"${stop_loss_value:.2f} (-${stop_loss_amount:.2f})" if stop_loss_value > 0 else "Not Set"}
