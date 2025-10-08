@@ -1247,7 +1247,7 @@ async def execute_trade_preview(update: Update, context: ContextTypes.DEFAULT_TY
     
     if not strategy:
         await query.answer("Strategy not found", show_alert=True)
-        return
+        return ConversationHandler.END
     
     # Get API credentials - use selected API or strategy's default
     user_data = await crud.get_user_by_telegram_id(db, user.id)
@@ -1259,6 +1259,13 @@ async def execute_trade_preview(update: Update, context: ContextTypes.DEFAULT_TY
     else:
         # Fallback to strategy's default API
         api_data = await crud.get_api_credential_by_id(db, strategy['api_id'])
+    
+    if not api_data:
+        await query.edit_message_text(
+            "❌ API credentials not found.",
+            reply_markup=get_main_menu_keyboard()
+        )
+        return ConversationHandler.END
 
     api_key = encryptor.decrypt(api_data['api_key_encrypted'])
     api_secret = encryptor.decrypt(api_data['api_secret_encrypted'])
@@ -1269,137 +1276,216 @@ async def execute_trade_preview(update: Update, context: ContextTypes.DEFAULT_TY
         parse_mode=ParseMode.HTML
     )
     
-    # Fetch market data
-    async with DeltaExchangeAPI(api_key, api_secret) as api:
-        calculator = StraddleCalculator(api)
-        
-        # Get spot price and ATM strike
-        spot_price = await api.get_spot_price(strategy['underlying'])
-        if not spot_price:
-            await query.edit_message_text(
-                "❌ Failed to fetch spot price. Please try again.",
-                reply_markup=get_main_menu_keyboard()
+    try:
+        # Fetch market data
+        async with DeltaExchangeAPI(api_key, api_secret) as api:
+            calculator = StraddleCalculator(api)
+            
+            # Get spot price and ATM strike
+            spot_price = await api.get_spot_price(strategy['underlying'])
+            if not spot_price:
+                await query.edit_message_text(
+                    "❌ Failed to fetch spot price. Please try again.",
+                    reply_markup=get_main_menu_keyboard()
+                )
+                return ConversationHandler.END
+            
+            # Get option chain first to get available strikes
+            options = await calculator.get_option_chain(
+                strategy['underlying'],
+                strategy['expiry_type']
             )
-            return
-        
-        atm_strike = await calculator.get_atm_strike(strategy['underlying'], strategy['strike_offset'])
-        if not atm_strike:
-            await query.edit_message_text(
-                "❌ Failed to calculate ATM strike. Please try again.",
-                reply_markup=get_main_menu_keyboard()
+            
+            if not options:
+                await query.edit_message_text(
+                    "❌ No options available for selected criteria.",
+                    reply_markup=get_main_menu_keyboard()
+                )
+                return ConversationHandler.END
+            
+            # Get available strikes
+            available_strikes = sorted(set([float(o.get('strike_price', 0)) 
+                                           for o in options if 'strike_price' in o]))
+            
+            # Calculate ATM strike with available strikes
+            atm_strike = await calculator.get_atm_strike(
+                strategy['underlying'],
+                strategy.get('strike_offset', 0),
+                available_strikes
             )
-            return
-        
-        # Find option contracts
-        call_contract, put_contract = await calculator.find_option_contracts(
-            strategy['underlying'],
-            atm_strike,
-            strategy['expiry_type']
-        )
-        
-        if not call_contract or not put_contract:
-            await query.edit_message_text(
-                "❌ Failed to find option contracts. Please check expiry settings.",
-                reply_markup=get_main_menu_keyboard()
+            
+            if not atm_strike:
+                await query.edit_message_text(
+                    "❌ Failed to calculate ATM strike. Please try again.",
+                    reply_markup=get_main_menu_keyboard()
+                )
+                return ConversationHandler.END
+            
+            # Find option contracts
+            call_contract, put_contract = await calculator.find_option_contracts(
+                strategy['underlying'],
+                atm_strike,
+                strategy['expiry_type']
             )
-            return
-        
-        # Get premiums
-        call_premium, put_premium = await calculator.get_option_premiums(
-            call_contract['symbol'],
-            put_contract['symbol']
-        )
-        
-        if not call_premium or not put_premium:
-            await query.edit_message_text(
-                "❌ Failed to fetch option premiums. Please try again.",
-                reply_markup=get_main_menu_keyboard()
+            
+            if not call_contract or not put_contract:
+                await query.edit_message_text(
+                    "❌ Failed to find option contracts. Please check expiry settings.",
+                    reply_markup=get_main_menu_keyboard()
+                )
+                return ConversationHandler.END
+            
+            # Get premiums
+            call_premium, put_premium = await calculator.get_option_premiums(
+                call_contract['symbol'],
+                put_contract['symbol']
             )
-            return
+            
+            if not call_premium or not put_premium:
+                await query.edit_message_text(
+                    "❌ Failed to fetch option premiums. Please try again.",
+                    reply_markup=get_main_menu_keyboard()
+                )
+                return ConversationHandler.END
+            
+            total_premium = call_premium + put_premium
+            lot_size = strategy.get('lot_size', 1)
+            total_cost = total_premium * lot_size
+            
+            # Calculate SL and Target
+            stop_loss_pct = strategy.get('stop_loss_pct', 0)
+            target_pct = strategy.get('target_pct')
+            
+            # Calculate stop loss
+            stop_loss_value = 0
+            stop_loss_amount = 0
+            
+            if stop_loss_pct > 0:
+                if strategy['direction'] == 'long':
+                    # Long: Loss when premium decreases
+                    stop_loss_amount = total_premium * (stop_loss_pct / 100)
+                    stop_loss_value = total_premium - stop_loss_amount
+                else:
+                    # Short: Loss when premium increases
+                    stop_loss_amount = total_premium * (stop_loss_pct / 100)
+                    stop_loss_value = total_premium + stop_loss_amount
+            
+            # Calculate target
+            target_value = 0
+            target_amount = 0
+            
+            if target_pct and target_pct > 0:
+                if strategy['direction'] == 'long':
+                    # Long: Profit when premium increases
+                    target_amount = total_premium * (target_pct / 100)
+                    target_value = total_premium + target_amount
+                else:
+                    # Short: Profit when premium decreases
+                    target_amount = total_premium * (target_pct / 100)
+                    target_value = total_premium - target_amount
+            
+            # ✅ FIXED: Get available balance in USD/USDT format
+            balance_response = await api.get_wallet_balance()
+            available_balance = 0.0
+            
+            bot_logger.info(f"Balance response: {balance_response}")
+            
+            if balance_response and 'result' in balance_response:
+                # Delta Exchange returns list of wallet balances
+                for wallet in balance_response['result']:
+                    # Try multiple asset identifiers
+                    asset_symbol = wallet.get('asset_symbol', '')
+                    asset_id = wallet.get('asset_id', -1)
+                    
+                    bot_logger.info(f"Checking wallet: asset_symbol={asset_symbol}, asset_id={asset_id}, balance={wallet.get('available_balance')}")
+                    
+                    # Check for USDT, USD, USDC, or asset_id == 0 (default USD)
+                    if asset_symbol in ['USDT', 'USD', 'USDC'] or asset_id == 0:
+                        available_balance = float(wallet.get('available_balance', 0))
+                        bot_logger.info(f"✅ Found balance: ${available_balance} in {asset_symbol or 'USD'}")
+                        break
+            
+            # ✅ FIXED: Calculate margin requirement
+            # For LONG straddle: need to pay premium
+            # For SHORT straddle: receive premium but need margin for potential loss
+            if strategy['direction'] == 'long':
+                required_margin = total_cost
+            else:
+                # For short positions, approximate margin as 2x premium
+                required_margin = total_cost * 2
+            
+            # Check if sufficient balance
+            margin_sufficient = available_balance >= required_margin
         
-        total_premium = call_premium + put_premium
-        total_cost = total_premium * strategy['lot_size']
+        # Store trade preview data in session
+        session = get_user_session(user.id)
+        session['trade_preview'] = {
+            'strategy_id': strategy_id,
+            'api_id': str(api_data['_id']),
+            'call_symbol': call_contract['symbol'],
+            'put_symbol': put_contract['symbol'],
+            'strike': atm_strike,
+            'spot_price': spot_price,
+            'call_premium': call_premium,
+            'put_premium': put_premium,
+            'total_premium': total_premium,
+            'total_cost': total_cost,
+            'lot_size': lot_size
+        }
         
-        # Calculate SL and Target
-        targets = await calculator.calculate_straddle_targets(
-            total_premium,
-            strategy['stop_loss_pct'],
-            strategy.get('target_pct')
-        )
+        direction_text = "📈 BUY" if strategy['direction'] == 'long' else "📉 SELL"
+        margin_status = "✅ Sufficient" if margin_sufficient else "❌ Insufficient"
         
-        # Check margin
-        margin_check = await api.check_margin_requirements(call_contract['symbol'], strategy['lot_size'])
-        
-        # FIXED: Get available balance
-        balance_response = await api.get_wallet_balance()
-        available_balance = 0
-        if 'result' in balance_response:
-            for wallet in balance_response['result']:
-                if wallet.get('asset_symbol') == 'INR':
-                    available_balance = float(wallet.get('available_balance', 0))
-                    break
-    
-    # Store trade preview data in session
-    session = get_user_session(user.id)
-    session['trade_preview'] = {
-        'strategy_id': strategy_id,
-        'call_symbol': call_contract['symbol'],
-        'put_symbol': put_contract['symbol'],
-        'strike': atm_strike,
-        'spot_price': spot_price,
-        'call_premium': call_premium,
-        'put_premium': put_premium,
-        'total_premium': total_premium,
-        'total_cost': total_cost,
-        'targets': targets
-    }
-    
-    direction_text = "📈 BUY" if strategy['direction'] == 'long' else "📉 SELL"
-    margin_status = "✅ Sufficient" if margin_check.get('sufficient') else "❌ Insufficient"
-    
-    preview_text = f"""
-<b>📊 Trade Preview - {direction_text} Straddle</b>
+        preview_text = f"""<b>🎯 Trade Preview - {direction_text} Straddle</b>
 
-<b>🔑 Active API:</b> {api_data['nickname']}
+<b>🔑 Active API:</b> {api_data.get('nickname', 'Unnamed')}
 <b>💰 Available Balance:</b> ${available_balance:,.2f}
 
-<b>Strategy:</b> {strategy['name']}
+<b>Strategy:</b> {strategy.get('name', strategy.get('strategy_name', 'Unnamed'))}
 <b>Direction:</b> {direction_text} Straddle
 
-<b>🎯 Trade Details:</b>
+<b>📊 Trade Details:</b>
 <b>Underlying:</b> {strategy['underlying']}
 <b>Spot Price:</b> ${spot_price:,.2f}
 <b>ATM Strike:</b> ${atm_strike:,.2f}
 
 <b>Call Option:</b> {call_contract['symbol']}
-<b>Call Premium:</b> ${call_premium:,.2f}
+<b>Call Premium:</b> ${call_premium:.2f}
 
 <b>Put Option:</b> {put_contract['symbol']}
-<b>Put Premium:</b> ${put_premium:,.2f}
+<b>Put Premium:</b> ${put_premium:.2f}
 
-<b>💰 Cost Analysis:</b>
-<b>Total Premium:</b> ${total_premium:,.2f}
-<b>Lot Size:</b> {strategy['lot_size']}
-<b>Total Cost:</b> ${total_cost:,.2f}
+<b>💵 Cost Analysis:</b>
+<b>Total Premium:</b> ${total_premium:.2f}
+<b>Lot Size:</b> {lot_size}
+<b>Total Cost:</b> ${total_cost:.2f}
 
 <b>🎯 Risk Management:</b>
-<b>Stop Loss:</b> ${targets['stop_loss']:,.2f} (-${targets['stop_loss_amount']:,.2f})
-<b>Target:</b> {f"${targets.get('target', 0):,.2f}" if targets.get('target') else 'Not Set'}
+<b>Stop Loss:</b> {f"${stop_loss_value:.2f} (-${stop_loss_amount:.2f})" if stop_loss_value > 0 else "Not Set"}
+<b>Target:</b> {f"${target_value:.2f} (+${target_amount:.2f})" if target_value > 0 else "Not Set"}
 
-<b>💳 Margin Status:</b> {margin_status}
-<b>Available:</b> ${margin_check.get('available', 0):,.2f}
-<b>Required:</b> ${margin_check.get('required', 0):,.2f}
+<b>📊 Margin Status:</b> {margin_status}
+<b>Available:</b> ${available_balance:.2f}
+<b>Required:</b> ${required_margin:.2f}
 
 ⚠️ <b>Confirm to execute this trade</b>
 """
-    
-    await query.edit_message_text(
-        preview_text,
-        parse_mode=ParseMode.HTML,
-        reply_markup=get_trade_confirmation_keyboard(strategy_id)
-    )
+        
+        await query.edit_message_text(
+            preview_text,
+            parse_mode=ParseMode.HTML,
+            reply_markup=get_trade_confirmation_keyboard(strategy_id)
+        )
 
-    return CONFIRMING_TRADE  # ← ADD THIS LINE
+        return CONFIRMING_TRADE
+    
+    except Exception as e:
+        bot_logger.error(f"Error in trade preview: {e}", exc_info=True)
+        await query.edit_message_text(
+            f"❌ Error preparing trade preview:\n{str(e)}",
+            reply_markup=get_main_menu_keyboard()
+        )
+        return ConversationHandler.END
 
 async def confirm_trade_execution(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Execute the trade after confirmation"""
