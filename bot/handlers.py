@@ -1626,81 +1626,65 @@ async def show_positions(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Get positions from Delta Exchange
             async with DeltaExchangeAPI(api_key, api_secret) as delta_api:
                 positions = await delta_api.get_positions()
-            
-            api_nickname = api.get('nickname', 'Unnamed API')
-            
-            # ✅ DEBUG: Log raw position data
-            bot_logger.info(f"Raw positions for {api_nickname}: {positions[:2]}")  # Log first 2
-            
-            # Filter only positions with size != 0
-            active_positions = [p for p in positions if abs(float(p.get('size', 0))) > 0]
-            
-            if active_positions:
-                positions_text += f"<b>📍 {api_nickname}</b>\n"
                 
-                for pos in active_positions:
-                    # ✅ DEBUG: Log full position structure
-                    bot_logger.info(f"Position structure: {pos}")
-                    
-                    # ✅ DEFENSIVE: Try multiple ways to get data
-                    # Method 1: Check if product is a dict
-                    product = pos.get('product', {})
-                    if not isinstance(product, dict):
-                        bot_logger.warning(f"Product is not a dict: {type(product)}")
-                        product = {}
-                    
-                    # Method 2: Try to get symbol from multiple locations
-                    symbol = (
-                        product.get('symbol') or 
-                        pos.get('symbol') or 
-                        pos.get('product_symbol') or
-                        'Unknown'
-                    )
-                    
-                    # Position details
-                    size = float(pos.get('size', 0))
-                    entry_price = float(pos.get('entry_price', 0))
-                    
-                    # ✅ Method 3: Try multiple locations for mark_price
-                    mark_price = 0
-                    if 'mark_price' in pos:
-                        mark_price = float(pos['mark_price'])
-                    elif 'mark_price' in product:
-                        mark_price = float(product['mark_price'])
-                    elif 'marking_price' in pos:  # Alternative field name
-                        mark_price = float(pos['marking_price'])
-                    
-                    bot_logger.info(f"Extracted: symbol={symbol}, entry={entry_price}, mark={mark_price}")
-                    
-                    # ✅ Get unrealized_pnl
-                    unrealized_pnl = float(pos.get('unrealized_pnl', 0))
-                    
-                    # If mark_price is still 0, calculate from entry + pnl
-                    if mark_price == 0 and entry_price > 0 and size != 0:
-                        # For SHORT positions: mark = entry - (pnl / size)
-                        # For LONG positions: mark = entry + (pnl / size)
-                        if size < 0:  # SHORT
-                            mark_price = entry_price - (unrealized_pnl / abs(size))
-                        else:  # LONG
-                            mark_price = entry_price + (unrealized_pnl / abs(size))
-                        bot_logger.info(f"Calculated mark_price: {mark_price}")
-                    
-                    # Determine side and PnL emoji
-                    pnl_emoji = "🟢" if unrealized_pnl > 0 else "🔴" if unrealized_pnl < 0 else "⚪"
-                    side = "🟢 LONG" if size > 0 else "🔴 SHORT"
-                    
-                    total_pnl += unrealized_pnl
-                    position_count += 1
-                    
-                    positions_text += (
-                        f"\n{side} <b>{symbol}</b>\n"
-                        f"   Size: {abs(size):.0f}\n"
-                        f"   Entry: ${entry_price:.2f}\n"
-                        f"   Mark: ${mark_price:.2f}\n"
-                        f"   {pnl_emoji} P&L: <b>${unrealized_pnl:,.2f}</b>\n"
-                    )
+                api_nickname = api.get('nickname', 'Unnamed API')
                 
-                positions_text += "\n"
+                # Filter only positions with size != 0
+                active_positions = [p for p in positions if abs(float(p.get('size', 0))) > 0]
+                
+                if active_positions:
+                    positions_text += f"<b>📍 {api_nickname}</b>\n"
+                    
+                    for pos in active_positions:
+                        # ✅ FIX: Get symbol from product_symbol (not nested)
+                        symbol = pos.get('product_symbol', 'Unknown')
+                        
+                        # Position details from API
+                        size = float(pos.get('size', 0))
+                        entry_price = float(pos.get('entry_price', 0))
+                        
+                        # ✅ FIX: Fetch live ticker data for mark_price
+                        mark_price = 0
+                        unrealized_pnl = 0
+                        
+                        if symbol != 'Unknown':
+                            bot_logger.info(f"Fetching ticker for {symbol}")
+                            ticker = await delta_api.get_ticker_by_symbol(symbol)
+                            
+                            if ticker:
+                                # Get mark_price from ticker
+                                mark_price = float(ticker.get('mark_price', 0))
+                                
+                                # ✅ Calculate unrealized P&L
+                                # For SHORT: P&L = (entry_price - mark_price) * |size|
+                                # For LONG: P&L = (mark_price - entry_price) * |size|
+                                if size < 0:  # SHORT position
+                                    unrealized_pnl = (entry_price - mark_price) * abs(size)
+                                else:  # LONG position
+                                    unrealized_pnl = (mark_price - entry_price) * abs(size)
+                                
+                                bot_logger.info(f"{symbol}: entry={entry_price}, mark={mark_price}, pnl={unrealized_pnl}")
+                            else:
+                                bot_logger.warning(f"No ticker data for {symbol}")
+                                # If no ticker, mark = entry (no P&L change)
+                                mark_price = entry_price
+                        
+                        # Determine side and PnL emoji
+                        pnl_emoji = "🟢" if unrealized_pnl > 0 else "🔴" if unrealized_pnl < 0 else "⚪"
+                        side = "🟢 LONG" if size > 0 else "🔴 SHORT"
+                        
+                        total_pnl += unrealized_pnl
+                        position_count += 1
+                        
+                        positions_text += (
+                            f"\n{side} <b>{symbol}</b>\n"
+                            f"   Size: {abs(size):.0f}\n"
+                            f"   Entry: ${entry_price:.2f}\n"
+                            f"   Mark: ${mark_price:.2f}\n"
+                            f"   {pnl_emoji} P&L: <b>${unrealized_pnl:,.2f}</b>\n"
+                        )
+                    
+                    positions_text += "\n"
             
         except Exception as e:
             bot_logger.error(f"Error fetching positions for {api.get('nickname')}: {e}", exc_info=True)
