@@ -2039,82 +2039,141 @@ View trade history: /history
 # ==================== HISTORY HANDLER ====================
 
 async def show_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show trade history across ALL APIs"""
+    """Show trade history from Delta Exchange API across ALL APIs"""
     query = update.callback_query
     await query.answer()
     
-    user = query.from_user
+    await query.edit_message_text("🔄 Loading trade history...")
     
     db = Database.get_database()
+    user = query.from_user
     user_data = await crud.get_user_by_telegram_id(db, user.id)
     
     if not user_data:
         await query.edit_message_text(
             "❌ User not found.",
-            reply_markup=get_main_menu_keyboard()
-        )
-        return
-    
-    # Get all closed trades for this user (across all APIs)
-    trades = await db.trades.find({
-        'user_id': user_data['_id'],
-        'status': 'closed'
-    }).sort('exit_time', -1).limit(20).to_list(20)
-    
-    if not trades:
-        await query.edit_message_text(
-            "📜 <b>Trade History</b>\n\n"
-            "No closed trades found.",
             parse_mode=ParseMode.HTML,
             reply_markup=get_main_menu_keyboard()
         )
         return
     
-    # ✅ Get API info for each trade
-    api_cache = {}
-    
-    history_text = "📜 <b>Trade History (Last 20)</b>\n\n"
-    
-    for idx, trade in enumerate(trades, 1):
-        # Get API nickname
-        api_id = str(trade['api_id'])
-        if api_id not in api_cache:
-            api_data = await crud.get_api_credential_by_id(db, trade['api_id'])
-            api_cache[api_id] = api_data.get('nickname', 'Unknown API') if api_data else 'Unknown API'
+    try:
+        # Get all API credentials
+        apis = await crud.get_user_api_credentials(db, user_data['_id'])
         
-        api_nickname = api_cache[api_id]
+        if not apis:
+            await query.edit_message_text(
+                "❌ No API credentials found.",
+                parse_mode=ParseMode.HTML,
+                reply_markup=get_main_menu_keyboard()
+            )
+            return
         
-        # Calculate P&L
-        pnl = trade.get('pnl', 0)
-        pnl_emoji = "🟢" if pnl > 0 else "🔴" if pnl < 0 else "⚪"
+        history_text = "📜 <b>Trade History</b>\n\n"
+        total_trades = 0
+        all_fills = []
         
-        # Format entry and exit times
-        entry_time = trade['entry_time'].strftime('%d %b, %H:%M')
-        exit_time = trade.get('exit_time')
-        exit_time_str = exit_time.strftime('%d %b, %H:%M') if exit_time else 'N/A'
+        for api in apis:
+            try:
+                # Decrypt credentials
+                api_key = encryptor.decrypt(api['api_key_encrypted'])
+                api_secret = encryptor.decrypt(api['api_secret_encrypted'])
+                
+                api_nickname = api.get('nickname', 'Unnamed API')
+                
+                # Get order history from Delta Exchange
+                async with DeltaExchangeAPI(api_key, api_secret) as delta_api:
+                    # Fetch order history (filled orders)
+                    history_response = await delta_api.get_order_history(limit=50)
+                    
+                    bot_logger.info(f"Order history for {api_nickname}: {history_response}")
+                    
+                    if history_response and 'result' in history_response:
+                        orders = history_response['result']
+                        
+                        # Filter only filled orders
+                        filled_orders = [
+                            o for o in orders 
+                            if o.get('state') == 'filled'
+                        ]
+                        
+                        bot_logger.info(f"Found {len(filled_orders)} filled orders for {api_nickname}")
+                        
+                        if filled_orders:
+                            history_text += f"<b>📍 {api_nickname}</b>\n"
+                            
+                            # Show last 10 filled orders for this API
+                            for order in filled_orders[:10]:
+                                symbol = order.get('product_symbol', 'Unknown')
+                                side = order.get('side', 'buy')
+                                size = float(order.get('size', 0))
+                                unfilled = float(order.get('unfilled_size', 0))
+                                filled_size = size - unfilled
+                                
+                                avg_price = float(order.get('average_fill_price', 0))
+                                commission = float(order.get('commission', 0))
+                                
+                                # Get order creation time
+                                created_at = order.get('created_at', '')
+                                if created_at:
+                                    from datetime import datetime
+                                    try:
+                                        order_time = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+                                        time_str = order_time.strftime('%d %b, %H:%M')
+                                    except:
+                                        time_str = created_at[:16]
+                                else:
+                                    time_str = 'N/A'
+                                
+                                side_emoji = "🟢" if side == 'buy' else "🔴"
+                                side_text = "BUY" if side == 'buy' else "SELL"
+                                
+                                history_text += (
+                                    f"\n{side_emoji} <b>{side_text} {symbol}</b>\n"
+                                    f"   Size: {filled_size:.0f}\n"
+                                    f"   Price: ${avg_price:.2f}\n"
+                                    f"   Commission: ${commission:.4f}\n"
+                                    f"   Time: {time_str}\n"
+                                )
+                                
+                                total_trades += 1
+                                all_fills.append({
+                                    'symbol': symbol,
+                                    'side': side,
+                                    'size': filled_size,
+                                    'price': avg_price,
+                                    'commission': commission,
+                                    'time': time_str
+                                })
+                            
+                            history_text += "\n"
+                        else:
+                            history_text += f"<b>📍 {api_nickname}</b>\nNo filled orders found.\n\n"
+                    else:
+                        history_text += f"<b>📍 {api_nickname}</b>\n❌ Unable to fetch history\n\n"
+                        
+            except Exception as api_error:
+                bot_logger.error(f"Error fetching history for {api.get('nickname')}: {api_error}", exc_info=True)
+                history_text += f"<b>📍 {api.get('nickname', 'Unnamed API')}</b>\n❌ Error: {str(api_error)[:50]}\n\n"
         
-        history_text += (
-            f"{idx}. {pnl_emoji} <b>{api_nickname}</b>\n"
-            f"   Symbols: {trade['call_symbol']}, {trade['put_symbol']}\n"
-            f"   Entry: {entry_time}\n"
-            f"   Exit: {exit_time_str}\n"
-            f"   P&L: <b>${pnl:,.2f}</b>\n\n"
+        if total_trades == 0:
+            history_text = "📜 <b>Trade History</b>\n\nNo closed trades found."
+        else:
+            history_text += f"<b>📊 SUMMARY</b>\nTotal Filled Orders: {total_trades}"
+        
+        await query.edit_message_text(
+            history_text,
+            parse_mode=ParseMode.HTML,
+            reply_markup=get_main_menu_keyboard()
         )
     
-    # Calculate total P&L
-    total_pnl = sum(t.get('pnl', 0) for t in trades)
-    total_emoji = "🟢" if total_pnl > 0 else "🔴" if total_pnl < 0 else "⚪"
-    
-    history_text += (
-        f"<b>📊 Summary (Last 20 Trades)</b>\n"
-        f"{total_emoji} Total P&L: <b>${total_pnl:,.2f}</b>"
-    )
-    
-    await query.edit_message_text(
-        history_text,
-        parse_mode=ParseMode.HTML,
-        reply_markup=get_main_menu_keyboard()
-    )
+    except Exception as e:
+        bot_logger.error(f"Error in show_history: {e}", exc_info=True)
+        await query.edit_message_text(
+            f"❌ Error loading trade history:\n{str(e)[:100]}",
+            parse_mode=ParseMode.HTML,
+            reply_markup=get_main_menu_keyboard()
+        )
 
 # ==================== CONVERSATION CANCEL HANDLER ====================
 
