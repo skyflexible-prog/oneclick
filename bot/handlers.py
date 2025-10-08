@@ -1606,8 +1606,7 @@ async def show_positions(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if not apis:
         await query.edit_message_text(
-            "❌ No API credentials found.\n\n"
-            "Please add your Delta Exchange API credentials first.",
+            "❌ No API credentials found.",
             parse_mode=ParseMode.HTML,
             reply_markup=get_main_menu_keyboard()
         )
@@ -1630,28 +1629,38 @@ async def show_positions(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             api_nickname = api.get('nickname', 'Unnamed API')
             
-            # Filter only positions with size > 0
+            # Filter only positions with size != 0
             active_positions = [p for p in positions if abs(float(p.get('size', 0))) > 0]
             
             if active_positions:
-                positions_text += f"<b>{api_nickname}</b>\n"
+                positions_text += f"<b>📍 {api_nickname}</b>\n"
                 
                 for pos in active_positions:
+                    # ✅ FIX: Delta Exchange returns nested product object
                     product = pos.get('product', {})
+                    
+                    # Get symbol from product
                     symbol = product.get('symbol', 'Unknown')
+                    
+                    # Position details
                     size = float(pos.get('size', 0))
                     entry_price = float(pos.get('entry_price', 0))
+                    
+                    # ✅ FIX: Get mark_price from product
                     mark_price = float(product.get('mark_price', 0))
+                    
+                    # ✅ FIX: Get unrealized_pnl from position
                     unrealized_pnl = float(pos.get('unrealized_pnl', 0))
                     
+                    # Determine side and PnL emoji
                     pnl_emoji = "🟢" if unrealized_pnl > 0 else "🔴" if unrealized_pnl < 0 else "⚪"
-                    side_emoji = "🟢 LONG" if size > 0 else "🔴 SHORT"
+                    side = "🟢 LONG" if size > 0 else "🔴 SHORT"
                     
                     total_pnl += unrealized_pnl
                     position_count += 1
                     
                     positions_text += (
-                        f"\n{side_emoji} <b>{symbol}</b>\n"
+                        f"\n{side} <b>{symbol}</b>\n"
                         f"   Size: {abs(size):.0f}\n"
                         f"   Entry: ${entry_price:.2f}\n"
                         f"   Mark: ${mark_price:.2f}\n"
@@ -1661,7 +1670,7 @@ async def show_positions(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 positions_text += "\n"
             
         except Exception as e:
-            bot_logger.error(f"Error fetching positions for {api.get('nickname')}: {e}")
+            bot_logger.error(f"Error fetching positions for {api.get('nickname')}: {e}", exc_info=True)
             positions_text += f"<b>{api.get('nickname', 'Unnamed API')}</b>\n❌ Error: {str(e)[:50]}\n\n"
     
     if position_count == 0:
