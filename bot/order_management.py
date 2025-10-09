@@ -222,22 +222,75 @@ async def view_order_details(update: Update, context: ContextTypes.DEFAULT_TYPE)
     )
 
 
+# bot/order_management.py
+
 async def show_edit_order_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show order edit options"""
+    """Show order edit options with market context"""
     query = update.callback_query
     await query.answer()
     
     order_idx = int(query.data.split('_')[-1])
     order = context.user_data.get('selected_order')
+    api_id = context.user_data.get('current_api_id')
     
     if not order:
         await query.answer("Order not found", show_alert=True)
         return
     
+    # Get current market price from position
+    try:
+        db = Database.get_database()
+        api_data = await crud.get_api_credential_by_id(db, api_id)
+        api_key = encryptor.decrypt(api_data['api_key_encrypted'])
+        api_secret = encryptor.decrypt(api_data['api_secret_encrypted'])
+        
+        async with DeltaExchangeAPI(api_key, api_secret) as delta_api:
+            positions_response = await delta_api.get_position(order['product_id'])
+            
+            if isinstance(positions_response, list):
+                positions = positions_response
+            elif isinstance(positions_response, dict) and 'result' in positions_response:
+                positions = positions_response['result']
+            else:
+                positions = []
+            
+            mark_price = None
+            entry_price = None
+            position_size = None
+            
+            for pos in positions:
+                if isinstance(pos, dict) and pos.get('product_id') == order['product_id']:
+                    mark_price = float(pos.get('mark_price', 0))
+                    entry_price = float(pos.get('entry_price', 0))
+                    position_size = int(pos.get('size', 0))
+                    break
+    except:
+        mark_price = None
+        entry_price = None
+        position_size = None
+    
     message = "<b>✏️ Edit Order</b>\n\n"
     message += f"<b>Symbol:</b> {order.get('product_symbol')}\n"
-    message += f"<b>Current Stop:</b> ${order.get('stop_price', 'N/A')}\n"
-    message += f"<b>Current Limit:</b> ${order.get('limit_price', 'N/A')}\n\n"
+    message += f"<b>Side:</b> {order.get('side', 'N/A').upper()}\n"
+    message += f"<b>Size:</b> {order.get('size', 0)}\n\n"
+    
+    if mark_price:
+        message += f"<b>📊 Market Info:</b>\n"
+        message += f"• Current Price: ${mark_price:.2f}\n"
+        if entry_price:
+            message += f"• Entry Price: ${entry_price:.2f}\n"
+            pnl_pct = ((mark_price - entry_price) / entry_price * 100) if entry_price > 0 else 0
+            if position_size and position_size < 0:
+                pnl_pct = -pnl_pct  # Flip for short
+            emoji = "🟢" if pnl_pct > 0 else "🔴" if pnl_pct < 0 else "⚪"
+            message += f"• P&L: {emoji} {pnl_pct:+.2f}%\n\n"
+    
+    message += f"<b>Current Order:</b>\n"
+    if order.get('stop_price'):
+        message += f"• Stop Price: ${order.get('stop_price')}\n"
+    if order.get('limit_price'):
+        message += f"• Limit Price: ${order.get('limit_price')}\n\n"
+    
     message += "What would you like to edit?"
     
     keyboard = [
@@ -255,17 +308,57 @@ async def show_edit_order_menu(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 async def edit_trigger_price_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Start editing trigger price"""
+    """Start editing trigger price with context"""
     query = update.callback_query
     await query.answer()
     
     order = context.user_data.get('selected_order')
+    api_id = context.user_data.get('current_api_id')
+    
+    # Get market price
+    try:
+        db = Database.get_database()
+        api_data = await crud.get_api_credential_by_id(db, api_id)
+        api_key = encryptor.decrypt(api_data['api_key_encrypted'])
+        api_secret = encryptor.decrypt(api_data['api_secret_encrypted'])
+        
+        async with DeltaExchangeAPI(api_key, api_secret) as delta_api:
+            positions_response = await delta_api.get_position(order['product_id'])
+            
+            if isinstance(positions_response, list):
+                positions = positions_response
+            elif isinstance(positions_response, dict) and 'result' in positions_response:
+                positions = positions_response['result']
+            else:
+                positions = []
+            
+            mark_price = None
+            for pos in positions:
+                if isinstance(pos, dict) and pos.get('product_id') == order['product_id']:
+                    mark_price = float(pos.get('mark_price', 0))
+                    break
+    except:
+        mark_price = None
+    
+    current_stop = order.get('stop_price', 'N/A')
+    side = order.get('side', 'buy').upper()
     
     message = "<b>🎯 Edit Trigger (Stop) Price</b>\n\n"
-    message += f"<b>Current Trigger:</b> ${order.get('stop_price', 'N/A')}\n\n"
-    message += "Enter new trigger price:\n"
-    message += "• Enter number (e.g., 61000)\n"
-    message += "• Or percentage (e.g., +5% or -3%)\n\n"
+    
+    if mark_price:
+        message += f"<b>Market Price:</b> ${mark_price:.2f}\n"
+    message += f"<b>Current Trigger:</b> ${current_stop}\n"
+    message += f"<b>Position:</b> {side}\n\n"
+    
+    message += "<b>Enter new trigger price:</b>\n"
+    message += "• Absolute: 0.55\n"
+    message += "• Percentage: +10% or -5%\n\n"
+    
+    if side == "SELL" or (order.get('size', 0) < 0 if 'size' in order else False):
+        message += "ℹ️ <i>For short positions:\nStop should be ABOVE entry</i>\n\n"
+    else:
+        message += "ℹ️ <i>For long positions:\nStop should be BELOW entry</i>\n\n"
+    
     message += "Use /cancel to abort"
     
     await query.edit_message_text(
@@ -277,17 +370,57 @@ async def edit_trigger_price_start(update: Update, context: ContextTypes.DEFAULT
 
 
 async def edit_limit_price_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Start editing limit price"""
+    """Start editing limit price with context"""
     query = update.callback_query
     await query.answer()
     
     order = context.user_data.get('selected_order')
+    api_id = context.user_data.get('current_api_id')
+    
+    # Get market price
+    try:
+        db = Database.get_database()
+        api_data = await crud.get_api_credential_by_id(db, api_id)
+        api_key = encryptor.decrypt(api_data['api_key_encrypted'])
+        api_secret = encryptor.decrypt(api_data['api_secret_encrypted'])
+        
+        async with DeltaExchangeAPI(api_key, api_secret) as delta_api:
+            positions_response = await delta_api.get_position(order['product_id'])
+            
+            if isinstance(positions_response, list):
+                positions = positions_response
+            elif isinstance(positions_response, dict) and 'result' in positions_response:
+                positions = positions_response['result']
+            else:
+                positions = []
+            
+            mark_price = None
+            for pos in positions:
+                if isinstance(pos, dict) and pos.get('product_id') == order['product_id']:
+                    mark_price = float(pos.get('mark_price', 0))
+                    break
+    except:
+        mark_price = None
+    
+    current_limit = order.get('limit_price', 'N/A')
+    current_stop = order.get('stop_price', 'N/A')
+    side = order.get('side', 'buy').upper()
     
     message = "<b>📊 Edit Limit Price</b>\n\n"
-    message += f"<b>Current Limit:</b> ${order.get('limit_price', 'N/A')}\n\n"
-    message += "Enter new limit price:\n"
-    message += "• Enter number (e.g., 60500)\n"
-    message += "• Or percentage (e.g., +2% or -1%)\n\n"
+    
+    if mark_price:
+        message += f"<b>Market Price:</b> ${mark_price:.2f}\n"
+    if current_stop != 'N/A':
+        message += f"<b>Trigger Price:</b> ${current_stop}\n"
+    message += f"<b>Current Limit:</b> ${current_limit}\n"
+    message += f"<b>Position:</b> {side}\n\n"
+    
+    message += "<b>Enter new limit price:</b>\n"
+    message += "• Absolute: 0.52\n"
+    message += "• Percentage: +2% or -1%\n\n"
+    
+    message += "ℹ️ <i>Limit is the worst price\nyou're willing to accept</i>\n\n"
+    
     message += "Use /cancel to abort"
     
     await query.edit_message_text(
