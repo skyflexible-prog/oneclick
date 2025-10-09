@@ -228,3 +228,28 @@ def get_cancel_keyboard() -> InlineKeyboardMarkup:
     keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data="main_menu")]]
     return InlineKeyboardMarkup(keyboard)
   
+
+# bot/keyboards.py
+
+def get_main_menu_keyboard():
+    """Get main menu keyboard"""
+    keyboard = [
+        [
+            InlineKeyboardButton("📊 Trade", callback_data="trade"),
+            InlineKeyboardButton("📋 Orders", callback_data="orders_menu")  # ✅ NEW
+        ],
+        [
+            InlineKeyboardButton("💼 Positions", callback_data="positions"),
+            InlineKeyboardButton("📈 History", callback_data="history")
+        ],
+        [
+            InlineKeyboardButton("💰 Balance", callback_data="balance"),
+            InlineKeyboardButton("⚙️ Strategies", callback_data="strategies")
+        ],
+        [
+            InlineKeyboardButton("🔑 API Keys", callback_data="api_menu"),
+            InlineKeyboardButton("❓ Help", callback_data="help")
+        ]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+    
