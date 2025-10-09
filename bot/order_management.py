@@ -452,7 +452,6 @@ async def sl_to_cost(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Get positions
             positions_response = await delta_api.get_position(order['product_id'])
             
-            # Parse response
             if isinstance(positions_response, list):
                 positions = positions_response
             elif isinstance(positions_response, dict) and 'result' in positions_response:
@@ -480,13 +479,13 @@ async def sl_to_cost(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             entry_price = float(position.get('entry_price', 0))
             position_size = int(position.get('size', 0))
+            mark_price = float(position.get('mark_price', 0))
             
-            bot_logger.info(f"Position: entry={entry_price}, size={position_size}")
+            bot_logger.info(f"Position: entry={entry_price}, size={position_size}, mark={mark_price}")
             
             if entry_price == 0:
                 await query.edit_message_text(
-                    "❌ <b>Unable to find entry price</b>\n\n"
-                    "This position may not have an entry price set.",
+                    "❌ <b>Unable to find entry price</b>",
                     parse_mode=ParseMode.HTML,
                     reply_markup=InlineKeyboardMarkup([[
                         InlineKeyboardButton("🔙 Back", callback_data="orders_menu")
@@ -494,27 +493,49 @@ async def sl_to_cost(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 return
             
-            # ✅ CORRECTED LOGIC FOR OPTIONS SL TO COST
-            # For options, entry_price is the premium paid/received
-            
-            # If position size is NEGATIVE (-1), you SOLD the option
-            # To close at breakeven, you need to BUY BACK at entry price
-            # SL should trigger ABOVE entry (to prevent losses)
-            
-            # If position size is POSITIVE (+1), you BOUGHT the option
-            # To close at breakeven, you need to SELL at entry price
-            # SL should trigger BELOW entry (to prevent losses)
-            
+            # ✅ CORRECTED LOGIC: Check if already profitable
             if position_size < 0:
-                # Short position (sold option)
-                # SL triggers if price goes UP (bad for short)
-                new_stop = entry_price * 1.01   # Trigger 1% above entry
-                new_limit = entry_price * 1.02  # Willing to buy up to 2% above
+                # Short position: Profit if mark_price < entry_price
+                already_profitable = mark_price < entry_price
+                
+                if already_profitable:
+                    # Set SL slightly above entry to lock in profit
+                    new_stop = entry_price * 1.01
+                    new_limit = entry_price * 1.02
+                else:
+                    # Still in loss, cannot move SL to cost yet
+                    await query.edit_message_text(
+                        f"⚠️ <b>Cannot move SL to cost yet</b>\n\n"
+                        f"<b>Entry:</b> ${entry_price}\n"
+                        f"<b>Current:</b> ${mark_price}\n\n"
+                        f"Position is still in loss. Wait for profit before moving SL to cost.",
+                        parse_mode=ParseMode.HTML,
+                        reply_markup=InlineKeyboardMarkup([[
+                            InlineKeyboardButton("🔙 Back", callback_data="orders_menu")
+                        ]])
+                    )
+                    return
             else:
-                # Long position (bought option)
-                # SL triggers if price goes DOWN (bad for long)
-                new_stop = entry_price * 0.99   # Trigger 1% below entry
-                new_limit = entry_price * 0.98  # Willing to sell down to 2% below
+                # Long position: Profit if mark_price > entry_price
+                already_profitable = mark_price > entry_price
+                
+                if already_profitable:
+                    # Set SL slightly below entry to lock in profit
+                    new_stop = entry_price * 0.99
+                    new_limit = entry_price * 0.98
+                else:
+                    # Still in loss
+                    await query.edit_message_text(
+                        f"⚠️ <b>Cannot move SL to cost yet</b>\n\n"
+                        f"<b>Entry:</b> ${entry_price}\n"
+                        f"<b>Current:</b> ${mark_price}\n\n"
+                        f"Position is still in loss. Wait for profit before moving SL to cost.",
+                        parse_mode=ParseMode.HTML,
+                        reply_markup=InlineKeyboardMarkup([[
+                            InlineKeyboardButton("🔙 Back", callback_data="orders_menu")
+                        ]])
+                    )
+                    return
             
             # Round to 2 decimals
             new_stop = round(new_stop, 2)
@@ -522,25 +543,21 @@ async def sl_to_cost(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             bot_logger.info(f"Updating SL: stop={new_stop}, limit={new_limit}")
             
-            # Update order - ONLY update stop and limit, not the whole order
-            try:
-                result = await delta_api.edit_order(
-                    product_id=order['product_id'],
-                    order_id=order['id'],
-                    stop_price=str(new_stop),
-                    limit_price=str(new_limit)
-                )
-                
-                bot_logger.info(f"Edit order result: {result}")
-                
-            except Exception as api_error:
-                bot_logger.error(f"API error editing order: {api_error}")
-                raise
+            # Update order
+            result = await delta_api.edit_order(
+                product_id=order['product_id'],
+                order_id=order['id'],
+                stop_price=str(new_stop),
+                limit_price=str(new_limit)
+            )
+            
+            bot_logger.info(f"Edit order result: {result}")
         
         await query.edit_message_text(
             f"✅ <b>SL Moved to Cost!</b>\n\n"
             f"<b>Position Size:</b> {position_size}\n"
             f"<b>Entry Price:</b> ${entry_price}\n"
+            f"<b>Current Price:</b> ${mark_price}\n"
             f"<b>New Stop:</b> ${new_stop}\n"
             f"<b>New Limit:</b> ${new_limit}\n\n"
             f"Your stop-loss is now at breakeven.",
