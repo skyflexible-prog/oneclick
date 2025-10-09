@@ -429,8 +429,6 @@ async def receive_limit_price(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
 
 
-# bot/order_management.py
-
 async def sl_to_cost(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Move stop-loss to cost (entry price with 1% buffer)"""
     query = update.callback_query
@@ -449,30 +447,70 @@ async def sl_to_cost(update: Update, context: ContextTypes.DEFAULT_TYPE):
         api_secret = encryptor.decrypt(api_data['api_secret_encrypted'])
         
         async with DeltaExchangeAPI(api_key, api_secret) as delta_api:
-            # ✅ FIX: Get positions returns a LIST, not a single object
+            # Get positions
             positions_response = await delta_api.get_position(order['product_id'])
             
-            # Handle different response formats
-            if isinstance(positions_response, list):
-                # Response is already a list
-                positions = positions_response
-            elif isinstance(positions_response, dict) and 'result' in positions_response:
-                # Response is wrapped in result
-                positions = positions_response['result']
-            else:
-                positions = [positions_response]
+            # 🔍 DEBUG: Log the exact response structure
+            bot_logger.info(f"DEBUG positions_response type: {type(positions_response)}")
+            bot_logger.info(f"DEBUG positions_response: {positions_response}")
             
-            # Find the position for this product
+            # Parse response
+            positions = []
+            
+            # Case 1: Response is a dict with 'result' key
+            if isinstance(positions_response, dict):
+                if 'result' in positions_response:
+                    result_data = positions_response['result']
+                    bot_logger.info(f"DEBUG result_data type: {type(result_data)}")
+                    
+                    if isinstance(result_data, list):
+                        positions = result_data
+                    else:
+                        positions = [result_data]
+                else:
+                    # Dict but no 'result' key - treat as single position
+                    positions = [positions_response]
+            
+            # Case 2: Response is already a list
+            elif isinstance(positions_response, list):
+                positions = positions_response
+            
+            # Case 3: Something else
+            else:
+                positions = [positions_response] if positions_response else []
+            
+            bot_logger.info(f"DEBUG positions list length: {len(positions)}")
+            bot_logger.info(f"DEBUG positions: {positions}")
+            
+            # Find matching position
             position = None
-            for pos in positions:
-                if pos.get('product_id') == order['product_id']:
-                    position = pos
-                    break
+            for idx, pos in enumerate(positions):
+                bot_logger.info(f"DEBUG checking position {idx}, type: {type(pos)}")
+                
+                # Handle if pos is a list (shouldn't be, but just in case)
+                if isinstance(pos, list):
+                    bot_logger.error(f"Position {idx} is a list, not a dict!")
+                    continue
+                
+                # Handle if pos is a dict
+                if isinstance(pos, dict):
+                    pos_product_id = pos.get('product_id')
+                    bot_logger.info(f"DEBUG position {idx} product_id: {pos_product_id}, looking for: {order['product_id']}")
+                    
+                    if pos_product_id == order['product_id']:
+                        position = pos
+                        bot_logger.info(f"DEBUG Found matching position!")
+                        break
             
             if not position:
+                error_msg = f"❌ <b>No position found</b>\n\n"
+                error_msg += f"Unable to find an open position for this order.\n\n"
+                error_msg += f"<b>Debug Info:</b>\n"
+                error_msg += f"Product ID: {order['product_id']}\n"
+                error_msg += f"Positions found: {len(positions)}"
+                
                 await query.edit_message_text(
-                    "❌ <b>No position found</b>\n\n"
-                    "Unable to find an open position for this order.",
+                    error_msg,
                     parse_mode=ParseMode.HTML,
                     reply_markup=InlineKeyboardMarkup([[
                         InlineKeyboardButton("🔙 Back", callback_data=f"view_order_{context.user_data.get('selected_order_idx', 0)}")
@@ -480,7 +518,9 @@ async def sl_to_cost(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 return
             
+            # Extract entry price
             entry_price = float(position.get('entry_price', 0))
+            bot_logger.info(f"DEBUG entry_price: {entry_price}")
             
             if entry_price == 0:
                 await query.edit_message_text(
@@ -496,16 +536,16 @@ async def sl_to_cost(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Calculate SL to cost
             side = order.get('side', 'buy')
             if side == 'buy':
-                # For long position, SL is below entry
-                new_stop = entry_price * 0.99  # 1% below entry
-                new_limit = entry_price * 0.98  # 2% below entry
+                new_stop = entry_price * 0.99
+                new_limit = entry_price * 0.98
             else:
-                # For short position, SL is above entry
-                new_stop = entry_price * 1.01  # 1% above entry
-                new_limit = entry_price * 1.02  # 2% above entry
+                new_stop = entry_price * 1.01
+                new_limit = entry_price * 1.02
             
             new_stop = round(new_stop, 2)
             new_limit = round(new_limit, 2)
+            
+            bot_logger.info(f"DEBUG Updating order - stop: {new_stop}, limit: {new_limit}")
             
             # Update order
             result = await delta_api.edit_order(
@@ -528,11 +568,15 @@ async def sl_to_cost(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         
     except Exception as e:
+        import traceback
+        error_traceback = traceback.format_exc()
         bot_logger.error(f"Error moving SL to cost: {e}")
+        bot_logger.error(f"Traceback: {error_traceback}")
+        
         await query.edit_message_text(
             f"❌ <b>Error moving SL to cost</b>\n\n"
             f"<code>{str(e)}</code>\n\n"
-            "Please check if you have an open position for this order.",
+            "Check logs for details.",
             parse_mode=ParseMode.HTML,
             reply_markup=InlineKeyboardMarkup([[
                 InlineKeyboardButton("🔙 Back", callback_data="orders_menu")
