@@ -72,7 +72,10 @@ from bot.handlers import (
     AWAITING_STRIKE_OFFSET,
     SELECTING_API,                  # ← ADD THIS
     SELECTING_STRATEGY,             # ← ADD THIS
-    CONFIRMING_TRADE,               # ← ADD THIS
+    CONFIRMING_TRADE             # ← ADD THIS
+)
+from utils.logger import bot_logger, trade_logger
+from bot.order_management import (
     show_order_management_menu,
     show_orders_for_api,
     view_order_details,
@@ -88,8 +91,6 @@ from bot.handlers import (
     AWAITING_TRIGGER_PRICE,
     AWAITING_LIMIT_PRICE
 )
-from utils.logger import bot_logger, trade_logger
-
 # Initialize Telegram Bot Application
 ptb = (
     Application.builder()
