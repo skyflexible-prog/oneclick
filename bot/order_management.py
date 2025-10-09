@@ -1,7 +1,7 @@
 # bot/order_management.py
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ContextTypes
+from telegram.ext import ContextTypes, ConversationHandler
 from telegram.constants import ParseMode
 from database import crud
 from config.database import Database
@@ -33,7 +33,7 @@ async def show_order_management_menu(update: Update, context: ContextTypes.DEFAU
             "❌ User not found. Please use /start first.",
             parse_mode=ParseMode.HTML
         )
-        return
+        return ConversationHandler.END
     
     # Get all API credentials
     apis = await crud.get_user_api_credentials(db, user_data['_id'])
@@ -47,7 +47,7 @@ async def show_order_management_menu(update: Update, context: ContextTypes.DEFAU
                 InlineKeyboardButton("🔙 Back to Menu", callback_data="main_menu")
             ]])
         )
-        return
+        return ConversationHandler.END
     
     # Create API selection keyboard
     keyboard = []
@@ -78,7 +78,6 @@ async def show_orders_for_api(update: Update, context: ContextTypes.DEFAULT_TYPE
     await query.answer()
     
     api_id = query.data.split('_')[-1]
-    user = query.from_user
     
     db = Database.get_database()
     api_data = await crud.get_api_credential_by_id(db, api_id)
@@ -88,7 +87,7 @@ async def show_orders_for_api(update: Update, context: ContextTypes.DEFAULT_TYPE
             "❌ API not found.",
             parse_mode=ParseMode.HTML
         )
-        return
+        return ConversationHandler.END
     
     # Decrypt credentials
     api_key = encryptor.decrypt(api_data['api_key_encrypted'])
@@ -110,7 +109,7 @@ async def show_orders_for_api(update: Update, context: ContextTypes.DEFAULT_TYPE
                     InlineKeyboardButton("🔙 Back", callback_data="orders_menu")
                 ]])
             )
-            return
+            return ConversationHandler.END
         
         # Store orders in context
         context.user_data['current_orders'] = orders
@@ -121,16 +120,14 @@ async def show_orders_for_api(update: Update, context: ContextTypes.DEFAULT_TYPE
         message += f"Found {len(orders)} open order(s):\n\n"
         
         keyboard = []
-        for idx, order in enumerate(orders[:10], 1):  # Limit to 10 orders
+        for idx, order in enumerate(orders[:10], 1):
             symbol = order.get('product_symbol', 'N/A')
             side = order.get('side', 'N/A').upper()
             order_type = order.get('order_type', 'N/A')
             size = order.get('size', 0)
-            unfilled_size = order.get('unfilled_size', 0)
             limit_price = order.get('limit_price', 'N/A')
             stop_price = order.get('stop_price', 'N/A')
             
-            # Order summary
             order_text = f"{idx}. {symbol} - {side}"
             if stop_price != 'N/A':
                 order_text += f" @ ${stop_price}"
@@ -171,7 +168,7 @@ async def show_orders_for_api(update: Update, context: ContextTypes.DEFAULT_TYPE
                 InlineKeyboardButton("🔙 Back", callback_data="orders_menu")
             ]])
         )
-        return
+        return ConversationHandler.END
 
 
 async def view_order_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -184,11 +181,11 @@ async def view_order_details(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     if order_idx >= len(orders):
         await query.answer("Order not found", show_alert=True)
-        return
+        return VIEWING_ORDERS
     
     order = orders[order_idx]
     context.user_data['selected_order'] = order
-    context.user_data['selected_order_idx'] = order_idx  # ✅ Store index
+    context.user_data['selected_order_idx'] = order_idx
     
     # Format order details
     message = "<b>📋 Order Details</b>\n\n"
@@ -220,9 +217,9 @@ async def view_order_details(update: Update, context: ContextTypes.DEFAULT_TYPE)
         parse_mode=ParseMode.HTML,
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
+    
+    return VIEWING_ORDERS
 
-
-# bot/order_management.py
 
 async def show_edit_order_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show order edit options with market context"""
@@ -235,7 +232,7 @@ async def show_edit_order_menu(update: Update, context: ContextTypes.DEFAULT_TYP
     
     if not order:
         await query.answer("Order not found", show_alert=True)
-        return
+        return VIEWING_ORDERS
     
     # Get current market price from position
     try:
@@ -264,7 +261,8 @@ async def show_edit_order_menu(update: Update, context: ContextTypes.DEFAULT_TYP
                     entry_price = float(pos.get('entry_price', 0))
                     position_size = int(pos.get('size', 0))
                     break
-    except:
+    except Exception as e:
+        bot_logger.error(f"Error getting position: {e}")
         mark_price = None
         entry_price = None
         position_size = None
@@ -281,7 +279,7 @@ async def show_edit_order_menu(update: Update, context: ContextTypes.DEFAULT_TYP
             message += f"• Entry Price: ${entry_price:.2f}\n"
             pnl_pct = ((mark_price - entry_price) / entry_price * 100) if entry_price > 0 else 0
             if position_size and position_size < 0:
-                pnl_pct = -pnl_pct  # Flip for short
+                pnl_pct = -pnl_pct
             emoji = "🟢" if pnl_pct > 0 else "🔴" if pnl_pct < 0 else "⚪"
             message += f"• P&L: {emoji} {pnl_pct:+.2f}%\n\n"
     
@@ -305,6 +303,8 @@ async def show_edit_order_menu(update: Update, context: ContextTypes.DEFAULT_TYP
         parse_mode=ParseMode.HTML,
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
+    
+    return VIEWING_ORDERS
 
 
 async def edit_trigger_price_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -342,6 +342,7 @@ async def edit_trigger_price_start(update: Update, context: ContextTypes.DEFAULT
     
     current_stop = order.get('stop_price', 'N/A')
     side = order.get('side', 'buy').upper()
+    position_size = order.get('size', 0)
     
     message = "<b>🎯 Edit Trigger (Stop) Price</b>\n\n"
     
@@ -354,7 +355,7 @@ async def edit_trigger_price_start(update: Update, context: ContextTypes.DEFAULT
     message += "• Absolute: 0.55\n"
     message += "• Percentage: +10% or -5%\n\n"
     
-    if side == "SELL" or (order.get('size', 0) < 0 if 'size' in order else False):
+    if position_size < 0:
         message += "ℹ️ <i>For short positions:\nStop should be ABOVE entry</i>\n\n"
     else:
         message += "ℹ️ <i>For long positions:\nStop should be BELOW entry</i>\n\n"
@@ -434,6 +435,17 @@ async def edit_limit_price_start(update: Update, context: ContextTypes.DEFAULT_T
 async def receive_trigger_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Receive and update trigger price"""
     user_input = update.message.text.strip()
+    
+    # Check for cancel
+    if user_input.lower() == '/cancel':
+        await update.message.reply_text(
+            "❌ Edit cancelled",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("🔙 Back to Orders", callback_data="orders_menu")
+            ]])
+        )
+        return ConversationHandler.END
+    
     order = context.user_data.get('selected_order')
     api_id = context.user_data.get('current_api_id')
     
@@ -445,23 +457,20 @@ async def receive_trigger_price(update: Update, context: ContextTypes.DEFAULT_TY
         current_stop = float(order.get('stop_price', 0))
         
         if '%' in user_input:
-            # Percentage change
             percentage = float(user_input.replace('%', '').replace('+', ''))
             new_stop = current_stop * (1 + percentage / 100)
         else:
-            # Absolute price
             new_stop = float(user_input)
         
         new_stop = round(new_stop, 2)
         
     except ValueError:
         await update.message.reply_text(
-            "❌ Invalid price format. Please enter a number or percentage.",
+            "❌ Invalid format. Try: 0.55 or +10%",
             parse_mode=ParseMode.HTML
         )
         return AWAITING_TRIGGER_PRICE
     
-    # Update order via API
     await update.message.reply_text("🔄 Updating order...")
     
     try:
@@ -469,7 +478,6 @@ async def receive_trigger_price(update: Update, context: ContextTypes.DEFAULT_TY
         api_secret = encryptor.decrypt(api_data['api_secret_encrypted'])
         
         async with DeltaExchangeAPI(api_key, api_secret) as delta_api:
-            # Delta Exchange edit order
             result = await delta_api.edit_order(
                 product_id=order['product_id'],
                 order_id=order['id'],
@@ -486,20 +494,34 @@ async def receive_trigger_price(update: Update, context: ContextTypes.DEFAULT_TY
             ]])
         )
         
-        return
+        return ConversationHandler.END
         
     except Exception as e:
         bot_logger.error(f"Error updating order: {e}")
         await update.message.reply_text(
-            f"❌ <b>Error updating order</b>\n\n{str(e)}",
-            parse_mode=ParseMode.HTML
+            f"❌ <b>Error:</b> {str(e)}",
+            parse_mode=ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("🔙 Back", callback_data="orders_menu")
+            ]])
         )
-        return
+        return ConversationHandler.END
 
 
 async def receive_limit_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Receive and update limit price"""
     user_input = update.message.text.strip()
+    
+    # Check for cancel
+    if user_input.lower() == '/cancel':
+        await update.message.reply_text(
+            "❌ Edit cancelled",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("🔙 Back to Orders", callback_data="orders_menu")
+            ]])
+        )
+        return ConversationHandler.END
+    
     order = context.user_data.get('selected_order')
     api_id = context.user_data.get('current_api_id')
     
@@ -511,23 +533,20 @@ async def receive_limit_price(update: Update, context: ContextTypes.DEFAULT_TYPE
         current_limit = float(order.get('limit_price', 0))
         
         if '%' in user_input:
-            # Percentage change
             percentage = float(user_input.replace('%', '').replace('+', ''))
             new_limit = current_limit * (1 + percentage / 100)
         else:
-            # Absolute price
             new_limit = float(user_input)
         
         new_limit = round(new_limit, 2)
         
     except ValueError:
         await update.message.reply_text(
-            "❌ Invalid price format. Please enter a number or percentage.",
+            "❌ Invalid format. Try: 0.52 or +2%",
             parse_mode=ParseMode.HTML
         )
         return AWAITING_LIMIT_PRICE
     
-    # Update order via API
     await update.message.reply_text("🔄 Updating order...")
     
     try:
@@ -551,18 +570,19 @@ async def receive_limit_price(update: Update, context: ContextTypes.DEFAULT_TYPE
             ]])
         )
         
-        return
+        return ConversationHandler.END
         
     except Exception as e:
         bot_logger.error(f"Error updating order: {e}")
         await update.message.reply_text(
-            f"❌ <b>Error updating order</b>\n\n{str(e)}",
-            parse_mode=ParseMode.HTML
+            f"❌ <b>Error:</b> {str(e)}",
+            parse_mode=ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("🔙 Back", callback_data="orders_menu")
+            ]])
         )
-        return
+        return ConversationHandler.END
 
-
-# bot/order_management.py
 
 async def sl_to_cost(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Move stop-loss to cost (entry price with buffer)"""
@@ -608,7 +628,7 @@ async def sl_to_cost(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         InlineKeyboardButton("🔙 Back", callback_data="orders_menu")
                     ]])
                 )
-                return
+                return VIEWING_ORDERS
             
             entry_price = float(position.get('entry_price', 0))
             position_size = int(position.get('size', 0))
@@ -624,19 +644,15 @@ async def sl_to_cost(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         InlineKeyboardButton("🔙 Back", callback_data="orders_menu")
                     ]])
                 )
-                return
+                return VIEWING_ORDERS
             
-            # ✅ CORRECTED LOGIC: Check if already profitable
+            # Check if already profitable
             if position_size < 0:
-                # Short position: Profit if mark_price < entry_price
                 already_profitable = mark_price < entry_price
-                
                 if already_profitable:
-                    # Set SL slightly above entry to lock in profit
                     new_stop = entry_price * 1.01
                     new_limit = entry_price * 1.02
                 else:
-                    # Still in loss, cannot move SL to cost yet
                     await query.edit_message_text(
                         f"⚠️ <b>Cannot move SL to cost yet</b>\n\n"
                         f"<b>Entry:</b> ${entry_price}\n"
@@ -647,17 +663,13 @@ async def sl_to_cost(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             InlineKeyboardButton("🔙 Back", callback_data="orders_menu")
                         ]])
                     )
-                    return
+                    return VIEWING_ORDERS
             else:
-                # Long position: Profit if mark_price > entry_price
                 already_profitable = mark_price > entry_price
-                
                 if already_profitable:
-                    # Set SL slightly below entry to lock in profit
                     new_stop = entry_price * 0.99
                     new_limit = entry_price * 0.98
                 else:
-                    # Still in loss
                     await query.edit_message_text(
                         f"⚠️ <b>Cannot move SL to cost yet</b>\n\n"
                         f"<b>Entry:</b> ${entry_price}\n"
@@ -668,9 +680,8 @@ async def sl_to_cost(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             InlineKeyboardButton("🔙 Back", callback_data="orders_menu")
                         ]])
                     )
-                    return
+                    return VIEWING_ORDERS
             
-            # Round to 2 decimals
             new_stop = round(new_stop, 2)
             new_limit = round(new_limit, 2)
             
@@ -700,6 +711,8 @@ async def sl_to_cost(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ]])
         )
         
+        return VIEWING_ORDERS
+        
     except Exception as e:
         import traceback
         error_traceback = traceback.format_exc()
@@ -714,6 +727,7 @@ async def sl_to_cost(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 InlineKeyboardButton("🔙 Back", callback_data="orders_menu")
             ]])
         )
+        return VIEWING_ORDERS
 
 
 async def cancel_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -752,10 +766,15 @@ async def cancel_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ]])
         )
         
+        return VIEWING_ORDERS
+        
     except Exception as e:
         bot_logger.error(f"Error cancelling order: {e}")
         await query.edit_message_text(
             f"❌ <b>Error cancelling order</b>\n\n{str(e)}",
-            parse_mode=ParseMode.HTML
-  )
-      
+            parse_mode=ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("🔙 Back", callback_data="orders_menu")
+            ]])
+        )
+        return VIEWING_ORDERS
