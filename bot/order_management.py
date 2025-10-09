@@ -198,7 +198,7 @@ async def view_order_details(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if order.get('limit_price'):
         message += f"<b>Limit Price:</b> ${order['limit_price']}\n"
     if order.get('stop_price'):
-        message += f"<b>Stop Price:</b> ${order['stop_price']}\n"
+        message += f"<b>Trigger Price:</b> ${order['stop_price']}\n"  # ✅ CHANGED
     
     message += f"<b>Status:</b> {order.get('state', 'N/A')}\n"
     message += f"<b>Order ID:</b> <code>{order.get('id', 'N/A')}</code>\n"
