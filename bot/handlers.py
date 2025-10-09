@@ -1082,31 +1082,76 @@ You can now execute this strategy with one click using /trade command!
     return ConversationHandler.END
 
 
+# bot/handlers.py
+
 async def list_strategies(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """List all user strategies"""
-    user = update.effective_user
+    query = update.callback_query
+    if query:
+        await query.answer()
+        user = query.from_user
+    else:
+        user = update.message.from_user
+    
     db = Database.get_database()
-    
     user_data = await crud.get_user_by_telegram_id(db, user.id)
-    strategies = await crud.get_user_strategies(db, user_data['_id'])
     
-    if not strategies:
-        await update.callback_query.answer()
-        await update.callback_query.edit_message_text(
-            "🎯 <b>Trading Strategies</b>\n\n"
-            "You haven't created any strategies yet.",
-            parse_mode=ParseMode.HTML,
-            reply_markup=get_strategy_management_keyboard()
-        )
+    if not user_data:
+        message = "❌ User not found. Please use /start first."
+        if query:
+            await query.edit_message_text(message, parse_mode=ParseMode.HTML)
+        else:
+            await update.message.reply_text(message, parse_mode=ParseMode.HTML)
         return
     
-    await update.callback_query.answer()
-    await update.callback_query.edit_message_text(
-        "🎯 <b>Your Trading Strategies</b>\n\n"
-        "Select a strategy to view details:",
-        parse_mode=ParseMode.HTML,
-        reply_markup=get_strategy_list_keyboard(strategies)
-    )
+    # Get all strategies for this user
+    strategies = await crud.get_user_strategies(db, user_data['_id'])
+    
+    if not strategies or len(strategies) == 0:
+        message = (
+            "<b>📊 Your Strategies</b>\n\n"
+            "No strategies found.\n\n"
+            "Create your first strategy to start trading!"
+        )
+        keyboard = [
+            [InlineKeyboardButton("➕ Create Strategy", callback_data="create_strategy")],
+            [InlineKeyboardButton("🔙 Back to Menu", callback_data="main_menu")]
+        ]
+    else:
+        message = f"<b>📊 Your Strategies ({len(strategies)})</b>\n\n"
+        
+        keyboard = []
+        for idx, strategy in enumerate(strategies[:10], 1):  # Limit to 10
+            name = strategy.get('name', 'Unnamed')
+            underlying = strategy.get('underlying', 'N/A')
+            direction = strategy.get('direction', 'N/A')
+            expiry = strategy.get('expiry_type', 'N/A')
+            
+            message += f"<b>{idx}. {name}</b>\n"
+            message += f"   {underlying} | {direction} | {expiry}\n\n"
+            
+            keyboard.append([
+                InlineKeyboardButton(
+                    f"{idx}. {name}",
+                    callback_data=f"view_strategy_{strategy['_id']}"
+                )
+            ])
+        
+        keyboard.append([InlineKeyboardButton("➕ Create New", callback_data="create_strategy")])
+        keyboard.append([InlineKeyboardButton("🔙 Back to Menu", callback_data="main_menu")])
+    
+    if query:
+        await query.edit_message_text(
+            message,
+            parse_mode=ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+    else:
+        await update.message.reply_text(
+            message,
+            parse_mode=ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
 
 
 async def view_strategy_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
