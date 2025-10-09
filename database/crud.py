@@ -525,5 +525,43 @@ async def get_all_positions(db: AsyncIOMotorDatabase, telegram_id: int) -> Dict:
     user_id_str = str(user["_id"])
     
     # Get live trades
-    live_trades = await get_user_trades(db, user
+    live_trades = await get_user_trades(db, user_id_str, status="open")
+    
+    # Get paper trades
+    paper_trades = await get_open_paper_trades(db, telegram_id)
+    
+    return {
+        "live": live_trades,
+        "paper": paper_trades
+    }
+
+
+async def get_combined_stats(db: AsyncIOMotorDatabase, telegram_id: int) -> Dict:
+    """Get combined statistics for both live and paper trading"""
+    user = await db.users.find_one({"telegram_id": telegram_id})
+    if not user:
+        return {
+            "live": {"total_trades": 0, "total_pnl": 0.0},
+            "paper": {"total_trades": 0, "total_pnl": 0.0}
+        }
+    
+    user_id_str = str(user["_id"])
+    
+    # Get live stats
+    live_trades = await get_user_trades(db, user_id_str)
+    live_total_pnl = sum(t.get("pnl", 0.0) for t in live_trades)
+    
+    # Get paper stats
+    paper_stats = await get_paper_stats(db, telegram_id)
+    
+    return {
+        "live": {
+            "total_trades": len(live_trades),
+            "total_pnl": live_total_pnl
+        },
+        "paper": {
+            "total_trades": paper_stats["total_trades"],
+            "total_pnl": paper_stats["total_pnl"]
+        }
+    }
             
