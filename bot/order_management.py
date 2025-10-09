@@ -188,6 +188,7 @@ async def view_order_details(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     order = orders[order_idx]
     context.user_data['selected_order'] = order
+    context.user_data['selected_order_idx'] = order_idx  # ✅ Store index
     
     # Format order details
     message = "<b>📋 Order Details</b>\n\n"
