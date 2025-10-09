@@ -242,6 +242,7 @@ def register_handlers():
     ptb.add_handler(CallbackQueryHandler(delete_api, pattern="^delete_api_"))
     
     ptb.add_handler(CallbackQueryHandler(list_strategies, pattern="^list_strategies$"))
+    ptb.add_handler(CallbackQueryHandler(list_strategies, pattern="^strategies$"))  # ✅ ADD THIS
     ptb.add_handler(CallbackQueryHandler(view_strategy_details, pattern="^view_strategy_"))
     ptb.add_handler(CallbackQueryHandler(delete_strategy, pattern="^delete_strategy_"))
     
