@@ -514,11 +514,25 @@ class DeltaExchangeAPI:
         return response.get("result")
 
 
-    async def get_position(self, product_id: int):
-        """Get position for a product"""
-        response = await self._make_request("GET", f"/v2/positions/margined", params={"product_id": product_id})
-        return response.get("result")
+    # trading/delta_api.py
+
+    async def get_position(self, product_id: int = None):
+        """
+        Get positions for a product
+        Returns a list of positions
+        """
+        params = {}
+        if product_id:
+            params["product_id"] = product_id
     
+        response = await self._make_request("GET", "/v2/positions/margined", params=params)
+    
+        # Delta API returns: {"success": true, "result": [...]}
+        if response.get("success") and "result" in response:
+            return response["result"]  # Return the list of positions
+    
+        return []
+
     async def check_margin_requirements(self, symbol: str, size: int) -> Dict:
         """Check if sufficient margin available for order"""
         try:
