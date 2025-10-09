@@ -142,12 +142,12 @@ def get_trade_execution_keyboard(strategies: List[Dict]) -> InlineKeyboardMarkup
     return InlineKeyboardMarkup(keyboard)
 
 
-def get_trade_confirmation_keyboard(strategy_id: str = None) -> InlineKeyboardMarkup:
-    """Confirmation keyboard for trade execution"""
+def get_trade_confirmation_keyboard(strategy_id: str) -> InlineKeyboardMarkup:
+    """Get trade confirmation keyboard"""
     keyboard = [
         [
-            InlineKeyboardButton("✅ Confirm", callback_data="confirm_trade"),
-            InlineKeyboardButton("❌ Cancel", callback_data="cancel_trade")
+            InlineKeyboardButton("✅ Confirm", callback_data=f"confirm_trade_{strategy_id}"),
+            InlineKeyboardButton("❌ Cancel", callback_data="cancel_trade")  # ← FIXED!
         ]
     ]
     return InlineKeyboardMarkup(keyboard)
