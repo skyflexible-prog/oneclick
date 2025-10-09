@@ -1,7 +1,7 @@
 # database/models.py
 
 from pydantic import BaseModel, Field
-from typing import Optional, List, Dict
+from typing import Optional
 from datetime import datetime
 from bson import ObjectId
 
@@ -41,17 +41,6 @@ class UserModel(BaseModel):
     is_active: bool = True
     created_at: datetime = Field(default_factory=datetime.utcnow)
     
-    # ✅ NEW: Paper trading fields
-    trading_mode: str = "live"  # "live" or "paper"
-    paper_balance: float = 10000.0  # Virtual USD balance
-    paper_trades: List[Dict] = Field(default_factory=list)  # Simulated trades
-    paper_stats: Dict = Field(default_factory=lambda: {
-        "total_trades": 0,
-        "winning_trades": 0,
-        "total_pnl": 0.0,
-        "started_at": None
-    })
-    
     class Config:
         populate_by_name = True
         arbitrary_types_allowed = True
@@ -88,13 +77,13 @@ class StrategyModel(BaseModel):
     trailing_sl: bool = False
     underlying: str = "BTC"  # "BTC" or "ETH"
     
-    # ✅ EXISTING: Automatic order fields
-    use_stop_loss_order: bool = False  # Enable/disable auto SL orders
-    sl_trigger_pct: Optional[float] = None  # Stop-loss trigger percentage
-    sl_limit_pct: Optional[float] = None  # Stop-loss limit percentage
+    # Automatic order fields
+    use_stop_loss_order: bool = False
+    sl_trigger_pct: Optional[float] = None
+    sl_limit_pct: Optional[float] = None
     
-    use_target_order: bool = False  # Enable/disable auto target orders
-    target_trigger_pct: Optional[float] = None  # Target trigger percentage
+    use_target_order: bool = False
+    target_trigger_pct: Optional[float] = None
     
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
@@ -125,9 +114,6 @@ class TradeModel(BaseModel):
     status: str = "open"  # "open", "closed", "partial"
     fees: float = 0.0
     
-    # ✅ NEW: Paper trading indicator
-    is_paper: bool = False  # True if this is a paper trade
-    
     class Config:
         populate_by_name = True
         arbitrary_types_allowed = True
@@ -146,29 +132,7 @@ class OrderModel(BaseModel):
     status: str = "pending"  # "pending", "filled", "cancelled", "rejected"
     timestamp: datetime = Field(default_factory=datetime.utcnow)
     
-    # ✅ NEW: Paper trading indicator
-    is_paper: bool = False  # True if this is a paper order
-    
     class Config:
         populate_by_name = True
         arbitrary_types_allowed = True
-
-
-# ✅ NEW: Paper Trade Model (for user's paper_trades array)
-class PaperTradeModel(BaseModel):
-    """Paper trade model (stored in user document)"""
-    id: str  # UUID for paper trade
-    symbol: str
-    side: str  # "buy" or "sell"
-    size: int
-    entry_price: float
-    order_type: str  # "market" or "limit"
-    timestamp: datetime
-    status: str  # "open" or "closed"
-    pnl: float = 0.0
-    exit_price: Optional[float] = None
-    exit_timestamp: Optional[datetime] = None
-    
-    class Config:
-        populate_by_name = True
-    
+        
