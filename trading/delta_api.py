@@ -499,24 +499,47 @@ class DeltaExchangeAPI:
             product_id: Product ID
             order_id: Order ID to edit
             **kwargs: Fields to update (stop_price, limit_price, size, etc.)
+    
+        Example:
+            await api.edit_order(
+                product_id=123,
+                order_id=456,
+                stop_price="61000",
+                limit_price="60500"
+            )
         """
         payload = {
+            "id": order_id,  # ✅ Include order ID in payload
             "product_id": product_id,
-            **kwargs  # This includes stop_price, limit_price, etc.
+            **kwargs
         }
     
-        # ✅ FIX: Use 'data' instead of 'json_data'
-        response = await self._make_request("PUT", f"/v2/orders/{order_id}", data=payload)
-        return response.get("result")
+        # ✅ FIX: Use correct endpoint with order_id in URL
+        response = await self._make_request("PUT", f"/v2/orders", data=payload)
+    
+        # Check if response has error
+        if isinstance(response, dict) and response.get("error"):
+            error_msg = response.get("error", {})
+            if isinstance(error_msg, dict):
+                error_text = error_msg.get("message", str(error_msg))
+            else:
+                error_text = str(error_msg)
+            raise Exception(f"API Error: {error_text}")
+    
+        return response.get("result") if isinstance(response, dict) else response
 
 
     async def cancel_order(self, product_id: int, order_id: int):
         """Cancel an order"""
-        response = await self._make_request("DELETE", f"/v2/orders/{order_id}", params={"product_id": product_id})
-        return response.get("result")
+        # ✅ Use DELETE with order_id in path and product_id in body
+        payload = {"product_id": product_id}
+        response = await self._make_request("DELETE", f"/v2/orders", data=payload)
+    
+        if isinstance(response, dict) and response.get("error"):
+            raise Exception(f"API Error: {response.get('error')}")
+    
+        return response.get("result") if isinstance(response, dict) else response
 
-
-    # trading/delta_api.py
 
     async def get_position(self, product_id: int = None):
         """
