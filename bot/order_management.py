@@ -137,7 +137,7 @@ async def show_orders_for_api(update: Update, context: ContextTypes.DEFAULT_TYPE
             message += f"<b>{idx}. {symbol}</b>\n"
             message += f"   Side: {side} | Size: {size}\n"
             if stop_price != 'N/A':
-                message += f"   Stop: ${stop_price}"
+                message += f"   Trigger: ${stop_price}"
             if limit_price != 'N/A':
                 message += f" | Limit: ${limit_price}"
             message += f"\n   Type: {order_type}\n\n"
@@ -198,7 +198,7 @@ async def view_order_details(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if order.get('limit_price'):
         message += f"<b>Limit Price:</b> ${order['limit_price']}\n"
     if order.get('stop_price'):
-        message += f"<b>Trigger Price:</b> ${order['stop_price']}\n"  # ✅ CHANGED
+        message += f"<b>Trigger Price:</b> ${order['stop_price']}\n"
     
     message += f"<b>Status:</b> {order.get('state', 'N/A')}\n"
     message += f"<b>Order ID:</b> <code>{order.get('id', 'N/A')}</code>\n"
@@ -285,7 +285,7 @@ async def show_edit_order_menu(update: Update, context: ContextTypes.DEFAULT_TYP
     
     message += f"<b>Current Order:</b>\n"
     if order.get('stop_price'):
-        message += f"• Stop Price: ${order.get('stop_price')}\n"
+        message += f"• Trigger Price: ${order.get('stop_price')}\n"  # ✅ CHANGED FROM "Stop Price"
     if order.get('limit_price'):
         message += f"• Limit Price: ${order.get('limit_price')}\n\n"
     
@@ -306,8 +306,6 @@ async def show_edit_order_menu(update: Update, context: ContextTypes.DEFAULT_TYP
     
     return VIEWING_ORDERS
 
-
-# bot/order_management.py
 
 async def edit_trigger_price_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Start editing trigger price with context"""
@@ -335,11 +333,11 @@ async def edit_trigger_price_start(update: Update, context: ContextTypes.DEFAULT
                 positions = []
             
             mark_price = None
-            entry_price = None  # ✅ ADD ENTRY PRICE
+            entry_price = None
             for pos in positions:
                 if isinstance(pos, dict) and pos.get('product_id') == order['product_id']:
                     mark_price = float(pos.get('mark_price', 0))
-                    entry_price = float(pos.get('entry_price', 0))  # ✅ GET ENTRY
+                    entry_price = float(pos.get('entry_price', 0))
                     break
     except:
         mark_price = None
@@ -351,7 +349,6 @@ async def edit_trigger_price_start(update: Update, context: ContextTypes.DEFAULT
     
     message = "<b>🎯 Edit Trigger (Stop) Price</b>\n\n"
     
-    # ✅ SHOW ENTRY PRICE FIRST
     if entry_price:
         message += f"<b>Entry Price:</b> ${entry_price:.2f}\n"
     if mark_price:
@@ -404,11 +401,11 @@ async def edit_limit_price_start(update: Update, context: ContextTypes.DEFAULT_T
                 positions = []
             
             mark_price = None
-            entry_price = None  # ✅ ADD ENTRY PRICE
+            entry_price = None
             for pos in positions:
                 if isinstance(pos, dict) and pos.get('product_id') == order['product_id']:
                     mark_price = float(pos.get('mark_price', 0))
-                    entry_price = float(pos.get('entry_price', 0))  # ✅ GET ENTRY
+                    entry_price = float(pos.get('entry_price', 0))
                     break
     except:
         mark_price = None
@@ -420,7 +417,6 @@ async def edit_limit_price_start(update: Update, context: ContextTypes.DEFAULT_T
     
     message = "<b>📊 Edit Limit Price</b>\n\n"
     
-    # ✅ SHOW ENTRY PRICE FIRST
     if entry_price:
         message += f"<b>Entry Price:</b> ${entry_price:.2f}\n"
     if mark_price:
@@ -716,7 +712,7 @@ async def sl_to_cost(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"<b>Position Size:</b> {position_size}\n"
             f"<b>Entry Price:</b> ${entry_price}\n"
             f"<b>Current Price:</b> ${mark_price}\n"
-            f"<b>New Stop:</b> ${new_stop}\n"
+            f"<b>New Trigger:</b> ${new_stop}\n"
             f"<b>New Limit:</b> ${new_limit}\n\n"
             f"Your stop-loss is now at breakeven.",
             parse_mode=ParseMode.HTML,
