@@ -429,8 +429,10 @@ async def receive_limit_price(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
 
 
+# bot/order_management.py
+
 async def sl_to_cost(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Move stop-loss to cost (entry price with 1% buffer)"""
+    """Move stop-loss to cost (entry price with buffer)"""
     query = update.callback_query
     await query.answer()
     
@@ -450,77 +452,36 @@ async def sl_to_cost(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Get positions
             positions_response = await delta_api.get_position(order['product_id'])
             
-            # 🔍 DEBUG: Log the exact response structure
-            bot_logger.info(f"DEBUG positions_response type: {type(positions_response)}")
-            bot_logger.info(f"DEBUG positions_response: {positions_response}")
-            
             # Parse response
-            positions = []
-            
-            # Case 1: Response is a dict with 'result' key
-            if isinstance(positions_response, dict):
-                if 'result' in positions_response:
-                    result_data = positions_response['result']
-                    bot_logger.info(f"DEBUG result_data type: {type(result_data)}")
-                    
-                    if isinstance(result_data, list):
-                        positions = result_data
-                    else:
-                        positions = [result_data]
-                else:
-                    # Dict but no 'result' key - treat as single position
-                    positions = [positions_response]
-            
-            # Case 2: Response is already a list
-            elif isinstance(positions_response, list):
+            if isinstance(positions_response, list):
                 positions = positions_response
-            
-            # Case 3: Something else
+            elif isinstance(positions_response, dict) and 'result' in positions_response:
+                positions = positions_response['result']
             else:
                 positions = [positions_response] if positions_response else []
             
-            bot_logger.info(f"DEBUG positions list length: {len(positions)}")
-            bot_logger.info(f"DEBUG positions: {positions}")
-            
             # Find matching position
             position = None
-            for idx, pos in enumerate(positions):
-                bot_logger.info(f"DEBUG checking position {idx}, type: {type(pos)}")
-                
-                # Handle if pos is a list (shouldn't be, but just in case)
-                if isinstance(pos, list):
-                    bot_logger.error(f"Position {idx} is a list, not a dict!")
-                    continue
-                
-                # Handle if pos is a dict
-                if isinstance(pos, dict):
-                    pos_product_id = pos.get('product_id')
-                    bot_logger.info(f"DEBUG position {idx} product_id: {pos_product_id}, looking for: {order['product_id']}")
-                    
-                    if pos_product_id == order['product_id']:
-                        position = pos
-                        bot_logger.info(f"DEBUG Found matching position!")
-                        break
+            for pos in positions:
+                if isinstance(pos, dict) and pos.get('product_id') == order['product_id']:
+                    position = pos
+                    break
             
             if not position:
-                error_msg = f"❌ <b>No position found</b>\n\n"
-                error_msg += f"Unable to find an open position for this order.\n\n"
-                error_msg += f"<b>Debug Info:</b>\n"
-                error_msg += f"Product ID: {order['product_id']}\n"
-                error_msg += f"Positions found: {len(positions)}"
-                
                 await query.edit_message_text(
-                    error_msg,
+                    "❌ <b>No position found</b>\n\n"
+                    "Unable to find an open position for this order.",
                     parse_mode=ParseMode.HTML,
                     reply_markup=InlineKeyboardMarkup([[
-                        InlineKeyboardButton("🔙 Back", callback_data=f"view_order_{context.user_data.get('selected_order_idx', 0)}")
+                        InlineKeyboardButton("🔙 Back", callback_data="orders_menu")
                     ]])
                 )
                 return
             
-            # Extract entry price
             entry_price = float(position.get('entry_price', 0))
-            bot_logger.info(f"DEBUG entry_price: {entry_price}")
+            position_size = int(position.get('size', 0))
+            
+            bot_logger.info(f"Position: entry={entry_price}, size={position_size}")
             
             if entry_price == 0:
                 await query.edit_message_text(
@@ -528,39 +489,61 @@ async def sl_to_cost(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     "This position may not have an entry price set.",
                     parse_mode=ParseMode.HTML,
                     reply_markup=InlineKeyboardMarkup([[
-                        InlineKeyboardButton("🔙 Back", callback_data=f"view_order_{context.user_data.get('selected_order_idx', 0)}")
+                        InlineKeyboardButton("🔙 Back", callback_data="orders_menu")
                     ]])
                 )
                 return
             
-            # Calculate SL to cost
-            side = order.get('side', 'buy')
-            if side == 'buy':
-                new_stop = entry_price * 0.99
-                new_limit = entry_price * 0.98
-            else:
-                new_stop = entry_price * 1.01
-                new_limit = entry_price * 1.02
+            # ✅ CORRECTED LOGIC FOR OPTIONS SL TO COST
+            # For options, entry_price is the premium paid/received
             
+            # If position size is NEGATIVE (-1), you SOLD the option
+            # To close at breakeven, you need to BUY BACK at entry price
+            # SL should trigger ABOVE entry (to prevent losses)
+            
+            # If position size is POSITIVE (+1), you BOUGHT the option
+            # To close at breakeven, you need to SELL at entry price
+            # SL should trigger BELOW entry (to prevent losses)
+            
+            if position_size < 0:
+                # Short position (sold option)
+                # SL triggers if price goes UP (bad for short)
+                new_stop = entry_price * 1.01   # Trigger 1% above entry
+                new_limit = entry_price * 1.02  # Willing to buy up to 2% above
+            else:
+                # Long position (bought option)
+                # SL triggers if price goes DOWN (bad for long)
+                new_stop = entry_price * 0.99   # Trigger 1% below entry
+                new_limit = entry_price * 0.98  # Willing to sell down to 2% below
+            
+            # Round to 2 decimals
             new_stop = round(new_stop, 2)
             new_limit = round(new_limit, 2)
             
-            bot_logger.info(f"DEBUG Updating order - stop: {new_stop}, limit: {new_limit}")
+            bot_logger.info(f"Updating SL: stop={new_stop}, limit={new_limit}")
             
-            # Update order
-            result = await delta_api.edit_order(
-                product_id=order['product_id'],
-                order_id=order['id'],
-                stop_price=str(new_stop),
-                limit_price=str(new_limit)
-            )
+            # Update order - ONLY update stop and limit, not the whole order
+            try:
+                result = await delta_api.edit_order(
+                    product_id=order['product_id'],
+                    order_id=order['id'],
+                    stop_price=str(new_stop),
+                    limit_price=str(new_limit)
+                )
+                
+                bot_logger.info(f"Edit order result: {result}")
+                
+            except Exception as api_error:
+                bot_logger.error(f"API error editing order: {api_error}")
+                raise
         
         await query.edit_message_text(
             f"✅ <b>SL Moved to Cost!</b>\n\n"
+            f"<b>Position Size:</b> {position_size}\n"
             f"<b>Entry Price:</b> ${entry_price}\n"
             f"<b>New Stop:</b> ${new_stop}\n"
             f"<b>New Limit:</b> ${new_limit}\n\n"
-            f"Your stop-loss is now at breakeven (±1%).",
+            f"Your stop-loss is now at breakeven.",
             parse_mode=ParseMode.HTML,
             reply_markup=InlineKeyboardMarkup([[
                 InlineKeyboardButton("🔙 Back to Orders", callback_data="orders_menu")
@@ -575,8 +558,7 @@ async def sl_to_cost(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         await query.edit_message_text(
             f"❌ <b>Error moving SL to cost</b>\n\n"
-            f"<code>{str(e)}</code>\n\n"
-            "Check logs for details.",
+            f"<code>{str(e)}</code>",
             parse_mode=ParseMode.HTML,
             reply_markup=InlineKeyboardMarkup([[
                 InlineKeyboardButton("🔙 Back", callback_data="orders_menu")
