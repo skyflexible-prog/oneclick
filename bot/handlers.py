@@ -1682,7 +1682,30 @@ View your position: /positions
     
     return ConversationHandler.END
 
+async def cancel_trade_execution(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Cancel trade execution and return to main menu"""
+    query = update.callback_query
+    await query.answer("Trade cancelled ❌")
     
+    # Clear any stored data
+    context.user_data.clear()
+    
+    # Return to main menu
+    text = (
+        "<b>🏠 Main Menu</b>\n\n"
+        "Trade execution cancelled.\n\n"
+        "What would you like to do?"
+    )
+    
+    await query.edit_message_text(
+        text,
+        parse_mode=ParseMode.HTML,
+        reply_markup=get_main_menu_keyboard()
+    )
+    
+    # End conversation
+    return ConversationHandler.END
+
 # ==================== POSITION MANAGEMENT HANDLERS ====================
 
 async def show_positions(update: Update, context: ContextTypes.DEFAULT_TYPE):
