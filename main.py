@@ -143,16 +143,14 @@ app = FastAPI(lifespan=lifespan)
 
 
 def register_handlers():
-    """Register all bot handlers"""
+    """Register all bot handlers - ORDER MATTERS!"""
     
-    # Command handlers
+    # 1. Command handlers
     ptb.add_handler(CommandHandler("start", start_command))
     ptb.add_handler(CommandHandler("help", help_command))
     ptb.add_handler(CommandHandler("balance", balance_command))
     
-    # ==================== CONVERSATION HANDLERS ====================
-    
-    # API Management Conversation Handler
+    # 2. ConversationHandlers
     api_conv_handler = ConversationHandler(
         entry_points=[CallbackQueryHandler(add_api_start, pattern="^add_api$")],
         states={
@@ -165,7 +163,6 @@ def register_handlers():
     )
     ptb.add_handler(api_conv_handler)
     
-    # Strategy Creation Conversation Handler
     strategy_conv_handler = ConversationHandler(
         entry_points=[CallbackQueryHandler(create_strategy_start, pattern="^create_strategy$")],
         states={
@@ -175,33 +172,15 @@ def register_handlers():
                 CallbackQueryHandler(receive_direction, pattern="^direction_"),
                 CallbackQueryHandler(receive_expiry, pattern="^expiry_")
             ],
-            AWAITING_LOT_SIZE: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_lot_size)
-            ],
-            AWAITING_STOP_LOSS: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_stop_loss)
-            ],
-            AWAITING_SL_ORDER_CHOICE: [
-                CallbackQueryHandler(receive_sl_order_choice, pattern="^sl_order_")
-            ],
-            AWAITING_SL_TRIGGER: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_sl_trigger)
-            ],
-            AWAITING_SL_LIMIT: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_sl_limit)
-            ],
-            AWAITING_TARGET: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_target)
-            ],
-            AWAITING_TARGET_ORDER_CHOICE: [
-                CallbackQueryHandler(receive_target_order_choice, pattern="^target_order_")
-            ],
-            AWAITING_MAX_CAPITAL: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_max_capital)
-            ],
-            AWAITING_STRIKE_OFFSET: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_strike_offset)
-            ]
+            AWAITING_LOT_SIZE: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_lot_size)],
+            AWAITING_STOP_LOSS: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_stop_loss)],
+            AWAITING_SL_ORDER_CHOICE: [CallbackQueryHandler(receive_sl_order_choice, pattern="^sl_order_")],
+            AWAITING_SL_TRIGGER: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_sl_trigger)],
+            AWAITING_SL_LIMIT: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_sl_limit)],
+            AWAITING_TARGET: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_target)],
+            AWAITING_TARGET_ORDER_CHOICE: [CallbackQueryHandler(receive_target_order_choice, pattern="^target_order_")],
+            AWAITING_MAX_CAPITAL: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_max_capital)],
+            AWAITING_STRIKE_OFFSET: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_strike_offset)]
         },
         fallbacks=[
             CallbackQueryHandler(cancel_conversation, pattern="^cancel$"),
@@ -211,18 +190,11 @@ def register_handlers():
     )
     ptb.add_handler(strategy_conv_handler)
     
-    # Trade Conversation Handler
     trade_conv_handler = ConversationHandler(
-        entry_points=[
-            CallbackQueryHandler(trade_menu, pattern="^trade$")
-        ],
+        entry_points=[CallbackQueryHandler(trade_menu, pattern="^trade$")],
         states={
-            SELECTING_API: [
-                CallbackQueryHandler(select_api_for_trade, pattern="^trade_api_")
-            ],
-            SELECTING_STRATEGY: [
-                CallbackQueryHandler(execute_trade_preview, pattern="^execute_")
-            ],
+            SELECTING_API: [CallbackQueryHandler(select_api_for_trade, pattern="^trade_api_")],
+            SELECTING_STRATEGY: [CallbackQueryHandler(execute_trade_preview, pattern="^execute_")],
             CONFIRMING_TRADE: [
                 CallbackQueryHandler(confirm_trade_execution, pattern="^confirm_trade"),
                 CallbackQueryHandler(cancel_trade_execution, pattern="^cancel_trade"),
@@ -237,25 +209,16 @@ def register_handlers():
     )
     ptb.add_handler(trade_conv_handler)
     
-    # Order Management Conversation Handler
     order_management_conv = ConversationHandler(
-        entry_points=[
-            CallbackQueryHandler(show_order_management_menu, pattern="^orders_menu$")
-        ],
+        entry_points=[CallbackQueryHandler(show_order_management_menu, pattern="^orders_menu$")],
         states={
-            SELECTING_ORDER_API: [
-                CallbackQueryHandler(show_orders_for_api, pattern="^orders_api_")
-            ],
+            SELECTING_ORDER_API: [CallbackQueryHandler(show_orders_for_api, pattern="^orders_api_")],
             VIEWING_ORDERS: [
                 CallbackQueryHandler(view_order_details, pattern="^view_order_"),
                 CallbackQueryHandler(show_orders_for_api, pattern="^orders_api_")
             ],
-            AWAITING_TRIGGER_PRICE: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_trigger_price)
-            ],
-            AWAITING_LIMIT_PRICE: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_limit_price)
-            ]
+            AWAITING_TRIGGER_PRICE: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_trigger_price)],
+            AWAITING_LIMIT_PRICE: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_limit_price)]
         },
         fallbacks=[
             CallbackQueryHandler(show_order_management_menu, pattern="^orders_menu$"),
@@ -266,42 +229,34 @@ def register_handlers():
     )
     ptb.add_handler(order_management_conv)
     
-    # ==================== SPECIFIC CALLBACK HANDLERS ====================
-    # ✅ CRITICAL: These MUST come BEFORE button_callback
-    
-    # Order action handlers (MOVED HERE - BEFORE button_callback!)
+    # 3. Specific callback handlers (BEFORE generic button_callback!)
     ptb.add_handler(CallbackQueryHandler(show_edit_order_menu, pattern="^edit_order_"))
     ptb.add_handler(CallbackQueryHandler(edit_trigger_price_start, pattern="^edit_trigger_"))
     ptb.add_handler(CallbackQueryHandler(edit_limit_price_start, pattern="^edit_limit_"))
     ptb.add_handler(CallbackQueryHandler(sl_to_cost, pattern="^sl_to_cost_"))
     ptb.add_handler(CallbackQueryHandler(cancel_order, pattern="^cancel_order_"))
     
-    # API management
     ptb.add_handler(CallbackQueryHandler(list_apis, pattern="^list_apis$"))
     ptb.add_handler(CallbackQueryHandler(view_api_details, pattern="^view_api_"))
     ptb.add_handler(CallbackQueryHandler(activate_api, pattern="^activate_api_"))
     ptb.add_handler(CallbackQueryHandler(delete_api, pattern="^delete_api_"))
     
-    # Strategy management
     ptb.add_handler(CallbackQueryHandler(list_strategies, pattern="^list_strategies$"))
     ptb.add_handler(CallbackQueryHandler(view_strategy_details, pattern="^view_strategy_"))
     ptb.add_handler(CallbackQueryHandler(delete_strategy, pattern="^delete_strategy_"))
     
-    # Position management
     ptb.add_handler(CallbackQueryHandler(show_positions, pattern="^positions$"))
     ptb.add_handler(CallbackQueryHandler(view_position_details, pattern="^view_position_"))
     ptb.add_handler(CallbackQueryHandler(close_position_confirm, pattern="^close_position_"))
     ptb.add_handler(CallbackQueryHandler(close_position_execute, pattern="^confirm_close_"))
     
-    # Balance and History
     ptb.add_handler(CallbackQueryHandler(show_balance, pattern="^balance$"))
     ptb.add_handler(CallbackQueryHandler(show_history, pattern="^history$"))
     
-    # ==================== GENERIC HANDLERS ====================
-    # ❌ MUST BE LAST - catches everything else
+    # 4. Generic handler (MUST BE LAST!)
     ptb.add_handler(CallbackQueryHandler(button_callback))
     
-    # Error handler
+    # 5. Error handler
     ptb.add_error_handler(error_handler)
     
     bot_logger.info("All handlers registered successfully")
