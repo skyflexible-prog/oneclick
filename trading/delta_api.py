@@ -476,6 +476,48 @@ class DeltaExchangeAPI:
         except Exception as e:
             api_logger.error(f"Error fetching contract size: {e}")
             return None
+
+    # trading/delta_api.py (ADD THESE METHODS)
+
+    async def get_open_orders(self, product_id: int = None):
+        """Get open orders"""
+        params = {"state": "open"}
+        if product_id:
+            params["product_id"] = product_id
+    
+        response = await self._make_request("GET", "/v2/orders", params=params)
+        return response.get("result", [])
+
+
+    async def edit_order(self, product_id: int, order_id: int, **kwargs):
+        """
+        Edit an existing order
+    
+        Args:
+            product_id: Product ID
+            order_id: Order ID to edit
+            **kwargs: Fields to update (stop_price, limit_price, size, etc.)
+        """
+        payload = {
+            "product_id": product_id,
+            "id": order_id,
+            **kwargs
+        }
+    
+        response = await self._make_request("PUT", f"/v2/orders/{order_id}", json_data=payload)
+        return response.get("result")
+
+
+    async def cancel_order(self, product_id: int, order_id: int):
+        """Cancel an order"""
+        response = await self._make_request("DELETE", f"/v2/orders/{order_id}", params={"product_id": product_id})
+        return response.get("result")
+
+
+    async def get_position(self, product_id: int):
+        """Get position for a product"""
+        response = await self._make_request("GET", f"/v2/positions/margined", params={"product_id": product_id})
+        return response.get("result")
     
     async def check_margin_requirements(self, symbol: str, size: int) -> Dict:
         """Check if sufficient margin available for order"""
