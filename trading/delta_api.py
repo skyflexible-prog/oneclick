@@ -489,6 +489,8 @@ class DeltaExchangeAPI:
         return response.get("result", [])
 
 
+    # trading/delta_api.py
+
     async def edit_order(self, product_id: int, order_id: int, **kwargs):
         """
         Edit an existing order
@@ -500,11 +502,11 @@ class DeltaExchangeAPI:
         """
         payload = {
             "product_id": product_id,
-            "id": order_id,
-            **kwargs
+            **kwargs  # This includes stop_price, limit_price, etc.
         }
     
-        response = await self._make_request("PUT", f"/v2/orders/{order_id}", json_data=payload)
+        # ✅ FIX: Use 'data' instead of 'json_data'
+        response = await self._make_request("PUT", f"/v2/orders/{order_id}", data=payload)
         return response.get("result")
 
 
