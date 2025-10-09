@@ -428,6 +428,8 @@ async def receive_limit_price(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
 
 
+# bot/order_management.py
+
 async def sl_to_cost(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Move stop-loss to cost (entry price with 1% buffer)"""
     query = update.callback_query
@@ -446,14 +448,47 @@ async def sl_to_cost(update: Update, context: ContextTypes.DEFAULT_TYPE):
         api_secret = encryptor.decrypt(api_data['api_secret_encrypted'])
         
         async with DeltaExchangeAPI(api_key, api_secret) as delta_api:
-            # Get position to find entry price
-            position = await delta_api.get_position(order['product_id'])
+            # ✅ FIX: Get positions returns a LIST, not a single object
+            positions_response = await delta_api.get_position(order['product_id'])
+            
+            # Handle different response formats
+            if isinstance(positions_response, list):
+                # Response is already a list
+                positions = positions_response
+            elif isinstance(positions_response, dict) and 'result' in positions_response:
+                # Response is wrapped in result
+                positions = positions_response['result']
+            else:
+                positions = [positions_response]
+            
+            # Find the position for this product
+            position = None
+            for pos in positions:
+                if pos.get('product_id') == order['product_id']:
+                    position = pos
+                    break
+            
+            if not position:
+                await query.edit_message_text(
+                    "❌ <b>No position found</b>\n\n"
+                    "Unable to find an open position for this order.",
+                    parse_mode=ParseMode.HTML,
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("🔙 Back", callback_data=f"view_order_{context.user_data.get('selected_order_idx', 0)}")
+                    ]])
+                )
+                return
+            
             entry_price = float(position.get('entry_price', 0))
             
             if entry_price == 0:
                 await query.edit_message_text(
-                    "❌ Unable to find entry price for this position.",
-                    parse_mode=ParseMode.HTML
+                    "❌ <b>Unable to find entry price</b>\n\n"
+                    "This position may not have an entry price set.",
+                    parse_mode=ParseMode.HTML,
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("🔙 Back", callback_data=f"view_order_{context.user_data.get('selected_order_idx', 0)}")
+                    ]])
                 )
                 return
             
@@ -481,9 +516,10 @@ async def sl_to_cost(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         await query.edit_message_text(
             f"✅ <b>SL Moved to Cost!</b>\n\n"
-            f"Entry Price: ${entry_price}\n"
-            f"New Stop: ${new_stop}\n"
-            f"New Limit: ${new_limit}",
+            f"<b>Entry Price:</b> ${entry_price}\n"
+            f"<b>New Stop:</b> ${new_stop}\n"
+            f"<b>New Limit:</b> ${new_limit}\n\n"
+            f"Your stop-loss is now at breakeven (±1%).",
             parse_mode=ParseMode.HTML,
             reply_markup=InlineKeyboardMarkup([[
                 InlineKeyboardButton("🔙 Back to Orders", callback_data="orders_menu")
@@ -493,8 +529,13 @@ async def sl_to_cost(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         bot_logger.error(f"Error moving SL to cost: {e}")
         await query.edit_message_text(
-            f"❌ <b>Error moving SL to cost</b>\n\n{str(e)}",
-            parse_mode=ParseMode.HTML
+            f"❌ <b>Error moving SL to cost</b>\n\n"
+            f"<code>{str(e)}</code>\n\n"
+            "Please check if you have an open position for this order.",
+            parse_mode=ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("🔙 Back", callback_data="orders_menu")
+            ]])
         )
 
 
