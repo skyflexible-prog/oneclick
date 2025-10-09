@@ -307,6 +307,8 @@ async def show_edit_order_menu(update: Update, context: ContextTypes.DEFAULT_TYP
     return VIEWING_ORDERS
 
 
+# bot/order_management.py
+
 async def edit_trigger_price_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Start editing trigger price with context"""
     query = update.callback_query
@@ -315,7 +317,7 @@ async def edit_trigger_price_start(update: Update, context: ContextTypes.DEFAULT
     order = context.user_data.get('selected_order')
     api_id = context.user_data.get('current_api_id')
     
-    # Get market price
+    # Get market price AND entry price
     try:
         db = Database.get_database()
         api_data = await crud.get_api_credential_by_id(db, api_id)
@@ -333,12 +335,15 @@ async def edit_trigger_price_start(update: Update, context: ContextTypes.DEFAULT
                 positions = []
             
             mark_price = None
+            entry_price = None  # ✅ ADD ENTRY PRICE
             for pos in positions:
                 if isinstance(pos, dict) and pos.get('product_id') == order['product_id']:
                     mark_price = float(pos.get('mark_price', 0))
+                    entry_price = float(pos.get('entry_price', 0))  # ✅ GET ENTRY
                     break
     except:
         mark_price = None
+        entry_price = None
     
     current_stop = order.get('stop_price', 'N/A')
     side = order.get('side', 'buy').upper()
@@ -346,6 +351,9 @@ async def edit_trigger_price_start(update: Update, context: ContextTypes.DEFAULT
     
     message = "<b>🎯 Edit Trigger (Stop) Price</b>\n\n"
     
+    # ✅ SHOW ENTRY PRICE FIRST
+    if entry_price:
+        message += f"<b>Entry Price:</b> ${entry_price:.2f}\n"
     if mark_price:
         message += f"<b>Market Price:</b> ${mark_price:.2f}\n"
     message += f"<b>Current Trigger:</b> ${current_stop}\n"
@@ -378,7 +386,7 @@ async def edit_limit_price_start(update: Update, context: ContextTypes.DEFAULT_T
     order = context.user_data.get('selected_order')
     api_id = context.user_data.get('current_api_id')
     
-    # Get market price
+    # Get market price AND entry price
     try:
         db = Database.get_database()
         api_data = await crud.get_api_credential_by_id(db, api_id)
@@ -396,12 +404,15 @@ async def edit_limit_price_start(update: Update, context: ContextTypes.DEFAULT_T
                 positions = []
             
             mark_price = None
+            entry_price = None  # ✅ ADD ENTRY PRICE
             for pos in positions:
                 if isinstance(pos, dict) and pos.get('product_id') == order['product_id']:
                     mark_price = float(pos.get('mark_price', 0))
+                    entry_price = float(pos.get('entry_price', 0))  # ✅ GET ENTRY
                     break
     except:
         mark_price = None
+        entry_price = None
     
     current_limit = order.get('limit_price', 'N/A')
     current_stop = order.get('stop_price', 'N/A')
@@ -409,6 +420,9 @@ async def edit_limit_price_start(update: Update, context: ContextTypes.DEFAULT_T
     
     message = "<b>📊 Edit Limit Price</b>\n\n"
     
+    # ✅ SHOW ENTRY PRICE FIRST
+    if entry_price:
+        message += f"<b>Entry Price:</b> ${entry_price:.2f}\n"
     if mark_price:
         message += f"<b>Market Price:</b> ${mark_price:.2f}\n"
     if current_stop != 'N/A':
