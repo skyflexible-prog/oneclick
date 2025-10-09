@@ -2307,3 +2307,80 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         bot_logger.error(f"Error in error handler: {e}")
     
+# At the END of bot/handlers.py (after all other functions)
+
+def main():
+    """Start the bot"""
+    from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ConversationHandler
+    from config.settings import settings
+    
+    application = Application.builder().token(settings.telegram_bot_token).build()
+    
+    # Command handlers
+    application.add_handler(CommandHandler("start", start_command))
+    application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("balance", balance_command))
+    
+    # API Management ConversationHandler
+    api_conv_handler = ConversationHandler(
+        entry_points=[CallbackQueryHandler(add_api_start, pattern="^add_api$")],
+        states={
+            AWAITING_API_NICKNAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_api_nickname)],
+            AWAITING_API_KEY: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_api_key)],
+            AWAITING_API_SECRET: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_api_secret)],
+        },
+        fallbacks=[CallbackQueryHandler(cancel_conversation, pattern="^cancel$")],
+    )
+    application.add_handler(api_conv_handler)
+    
+    # Strategy Creation ConversationHandler
+    strategy_conv_handler = ConversationHandler(
+        entry_points=[CallbackQueryHandler(create_strategy_start, pattern="^create_strategy$")],
+        states={
+            AWAITING_STRATEGY_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_strategy_name)],
+            AWAITING_LOT_SIZE: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_lot_size)],
+            AWAITING_STOP_LOSS: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_stop_loss)],
+            AWAITING_TARGET: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_target)],
+            AWAITING_MAX_CAPITAL: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_max_capital)],
+            AWAITING_STRIKE_OFFSET: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_strike_offset)],
+        },
+        fallbacks=[CallbackQueryHandler(cancel_conversation, pattern="^cancel$")],
+    )
+    application.add_handler(strategy_conv_handler)
+    
+    # ✅ CRITICAL: Cancel trade handler MUST come BEFORE general button_callback
+    application.add_handler(CallbackQueryHandler(cancel_trade_execution, pattern="^cancel_trade$"))
+    
+    # Trade execution handlers
+    application.add_handler(CallbackQueryHandler(confirm_trade_execution, pattern="^confirm_trade_"))
+    application.add_handler(CallbackQueryHandler(execute_trade_preview, pattern="^trade_strategy_"))
+    application.add_handler(CallbackQueryHandler(trade_menu, pattern="^trade$"))
+    
+    # Position handlers
+    application.add_handler(CallbackQueryHandler(show_positions, pattern="^positions$"))
+    application.add_handler(CallbackQueryHandler(view_position_details, pattern="^position_"))
+    application.add_handler(CallbackQueryHandler(close_position_confirm, pattern="^close_"))
+    application.add_handler(CallbackQueryHandler(close_position_execute, pattern="^execute_close_"))
+    
+    # Strategy handlers
+    application.add_handler(CallbackQueryHandler(list_strategies, pattern="^strategies$"))
+    application.add_handler(CallbackQueryHandler(view_strategy_details, pattern="^strategy_"))
+    application.add_handler(CallbackQueryHandler(delete_strategy, pattern="^delete_strategy_"))
+    
+    # History
+    application.add_handler(CallbackQueryHandler(show_history, pattern="^history$"))
+    
+    # General callback handler (MUST BE LAST!)
+    application.add_handler(CallbackQueryHandler(button_callback))
+    
+    # Error handler
+    application.add_error_handler(error_handler)
+    
+    # Start bot
+    bot_logger.info("🤖 Starting bot...")
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
+
+
+if __name__ == "__main__":
+    main()
+    
