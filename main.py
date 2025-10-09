@@ -49,6 +49,7 @@ from bot.handlers import (
     select_api_for_trade,
     execute_trade_preview,
     confirm_trade_execution,
+    cancel_trade_execution,
     show_positions,
     view_position_details,
     close_position_confirm,
