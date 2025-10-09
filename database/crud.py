@@ -266,3 +266,264 @@ async def update_trade_status(db, trade_id: ObjectId, status: str):
         bot_logger.error(f"Error updating trade status: {e}")
         return False
         
+
+# database/crud.py (APPEND TO END)
+
+# ==================== PAPER TRADING OPERATIONS ====================
+
+async def get_user_trading_mode(db: AsyncIOMotorDatabase, telegram_id: int) -> str:
+    """Get user's current trading mode"""
+    user = await db.users.find_one({"telegram_id": telegram_id})
+    if not user:
+        return "live"
+    return user.get("trading_mode", "live")
+
+
+async def set_user_trading_mode(db: AsyncIOMotorDatabase, telegram_id: int, mode: str):
+    """Set user's trading mode (live or paper)"""
+    await db.users.update_one(
+        {"telegram_id": telegram_id},
+        {"$set": {"trading_mode": mode}}
+    )
+
+
+async def initialize_paper_trading(db: AsyncIOMotorDatabase, telegram_id: int, initial_balance: float = 10000.0):
+    """Initialize paper trading for a user"""
+    await db.users.update_one(
+        {"telegram_id": telegram_id},
+        {
+            "$set": {
+                "trading_mode": "paper",
+                "paper_balance": initial_balance,
+                "paper_trades": [],
+                "paper_stats": {
+                    "total_trades": 0,
+                    "winning_trades": 0,
+                    "total_pnl": 0.0,
+                    "started_at": datetime.utcnow()
+                }
+            }
+        }
+    )
+
+
+async def get_paper_balance(db: AsyncIOMotorDatabase, telegram_id: int) -> float:
+    """Get user's paper trading balance"""
+    user = await db.users.find_one({"telegram_id": telegram_id})
+    if not user:
+        return 10000.0
+    return user.get("paper_balance", 10000.0)
+
+
+async def update_paper_balance(db: AsyncIOMotorDatabase, telegram_id: int, new_balance: float):
+    """Update paper trading balance"""
+    await db.users.update_one(
+        {"telegram_id": telegram_id},
+        {"$set": {"paper_balance": new_balance}}
+    )
+
+
+async def add_paper_trade(db: AsyncIOMotorDatabase, telegram_id: int, trade: Dict):
+    """Add a paper trade to user's history"""
+    await db.users.update_one(
+        {"telegram_id": telegram_id},
+        {
+            "$push": {"paper_trades": trade},
+            "$inc": {"paper_stats.total_trades": 1}
+        }
+    )
+
+
+async def get_paper_trades(db: AsyncIOMotorDatabase, telegram_id: int, status: str = None) -> List[Dict]:
+    """Get user's paper trades"""
+    user = await db.users.find_one({"telegram_id": telegram_id})
+    if not user:
+        return []
+    
+    trades = user.get("paper_trades", [])
+    
+    # Filter by status if provided
+    if status:
+        trades = [t for t in trades if t.get("status") == status]
+    
+    return trades
+
+
+async def get_open_paper_trades(db: AsyncIOMotorDatabase, telegram_id: int) -> List[Dict]:
+    """Get all open paper trades for user"""
+    return await get_paper_trades(db, telegram_id, status="open")
+
+
+async def update_paper_trade(db: AsyncIOMotorDatabase, telegram_id: int, trade_id: str, updates: Dict):
+    """Update a specific paper trade"""
+    # Get all trades
+    user = await db.users.find_one({"telegram_id": telegram_id})
+    if not user:
+        return False
+    
+    trades = user.get("paper_trades", [])
+    
+    # Find and update the trade
+    trade_updated = False
+    for trade in trades:
+        if trade.get("id") == trade_id:
+            trade.update(updates)
+            trade_updated = True
+            break
+    
+    if trade_updated:
+        # Update the entire trades array
+        await db.users.update_one(
+            {"telegram_id": telegram_id},
+            {"$set": {"paper_trades": trades}}
+        )
+    
+    return trade_updated
+
+
+async def close_paper_trade(
+    db: AsyncIOMotorDatabase,
+    telegram_id: int,
+    trade_id: str,
+    exit_price: float,
+    pnl: float
+):
+    """Close a paper trade"""
+    # Get user
+    user = await db.users.find_one({"telegram_id": telegram_id})
+    if not user:
+        return False
+    
+    trades = user.get("paper_trades", [])
+    current_balance = user.get("paper_balance", 0.0)
+    
+    # Find and close the trade
+    trade_closed = False
+    winning_trade = False
+    
+    for trade in trades:
+        if trade.get("id") == trade_id and trade.get("status") == "open":
+            trade["status"] = "closed"
+            trade["exit_price"] = exit_price
+            trade["exit_timestamp"] = datetime.utcnow()
+            trade["pnl"] = pnl
+            trade_closed = True
+            winning_trade = pnl > 0
+            break
+    
+    if trade_closed:
+        # Update balance and stats
+        new_balance = current_balance + pnl
+        
+        update_ops = {
+            "$set": {
+                "paper_trades": trades,
+                "paper_balance": new_balance
+            },
+            "$inc": {
+                "paper_stats.total_pnl": pnl
+            }
+        }
+        
+        # Increment winning trades if profitable
+        if winning_trade:
+            update_ops["$inc"]["paper_stats.winning_trades"] = 1
+        
+        await db.users.update_one(
+            {"telegram_id": telegram_id},
+            update_ops
+        )
+    
+    return trade_closed
+
+
+async def get_paper_stats(db: AsyncIOMotorDatabase, telegram_id: int) -> Dict:
+    """Get paper trading statistics"""
+    user = await db.users.find_one({"telegram_id": telegram_id})
+    if not user:
+        return {
+            "balance": 10000.0,
+            "initial_balance": 10000.0,
+            "total_pnl": 0.0,
+            "total_trades": 0,
+            "winning_trades": 0,
+            "losing_trades": 0,
+            "win_rate": 0.0,
+            "started_at": None
+        }
+    
+    stats = user.get("paper_stats", {})
+    balance = user.get("paper_balance", 10000.0)
+    initial_balance = 10000.0  # Default starting balance
+    
+    total_trades = stats.get("total_trades", 0)
+    winning_trades = stats.get("winning_trades", 0)
+    total_pnl = stats.get("total_pnl", 0.0)
+    losing_trades = total_trades - winning_trades
+    
+    win_rate = (winning_trades / total_trades * 100) if total_trades > 0 else 0.0
+    
+    return {
+        "balance": balance,
+        "initial_balance": initial_balance,
+        "total_pnl": total_pnl,
+        "total_trades": total_trades,
+        "winning_trades": winning_trades,
+        "losing_trades": losing_trades,
+        "win_rate": win_rate,
+        "started_at": stats.get("started_at")
+    }
+
+
+async def reset_paper_account(db: AsyncIOMotorDatabase, telegram_id: int, initial_balance: float = 10000.0):
+    """Reset paper trading account to initial state"""
+    await db.users.update_one(
+        {"telegram_id": telegram_id},
+        {
+            "$set": {
+                "paper_balance": initial_balance,
+                "paper_trades": [],
+                "paper_stats": {
+                    "total_trades": 0,
+                    "winning_trades": 0,
+                    "total_pnl": 0.0,
+                    "started_at": datetime.utcnow()
+                }
+            }
+        }
+    )
+
+
+async def check_paper_trade_exists(db: AsyncIOMotorDatabase, telegram_id: int, trade_id: str) -> bool:
+    """Check if a paper trade exists"""
+    user = await db.users.find_one({"telegram_id": telegram_id})
+    if not user:
+        return False
+    
+    trades = user.get("paper_trades", [])
+    return any(t.get("id") == trade_id for t in trades)
+
+
+async def get_paper_trade_by_id(db: AsyncIOMotorDatabase, telegram_id: int, trade_id: str) -> Optional[Dict]:
+    """Get a specific paper trade by ID"""
+    user = await db.users.find_one({"telegram_id": telegram_id})
+    if not user:
+        return None
+    
+    trades = user.get("paper_trades", [])
+    return next((t for t in trades if t.get("id") == trade_id), None)
+
+
+# ==================== HYBRID OPERATIONS (Live + Paper) ====================
+
+async def get_all_positions(db: AsyncIOMotorDatabase, telegram_id: int) -> Dict:
+    """Get both live and paper positions"""
+    user = await db.users.find_one({"telegram_id": telegram_id})
+    if not user:
+        return {"live": [], "paper": []}
+    
+    user_id_str = str(user["_id"])
+    
+    # Get live trades
+    live_trades = await get_user_trades(db, user
+            
