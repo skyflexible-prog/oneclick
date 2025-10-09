@@ -499,46 +499,52 @@ class DeltaExchangeAPI:
             product_id: Product ID
             order_id: Order ID to edit
             **kwargs: Fields to update (stop_price, limit_price, size, etc.)
-    
-        Example:
-            await api.edit_order(
-                product_id=123,
-                order_id=456,
-                stop_price="61000",
-                limit_price="60500"
-            )
         """
         payload = {
-            "id": order_id,  # ✅ Include order ID in payload
+            "id": order_id,
             "product_id": product_id,
             **kwargs
         }
     
-        # ✅ FIX: Use correct endpoint with order_id in URL
-        response = await self._make_request("PUT", f"/v2/orders", data=payload)
+        response = await self._make_request("PUT", "/v2/orders", data=payload)
     
-        # Check if response has error
-        if isinstance(response, dict) and response.get("error"):
-            error_msg = response.get("error", {})
-            if isinstance(error_msg, dict):
-                error_text = error_msg.get("message", str(error_msg))
-            else:
-                error_text = str(error_msg)
-            raise Exception(f"API Error: {error_text}")
+        # Check for errors
+        if isinstance(response, dict):
+            if response.get("error") or not response.get("success", True):
+                error_msg = response.get("error", {})
+                if isinstance(error_msg, dict):
+                    error_code = error_msg.get('code', 'unknown')
+                    error_context = error_msg.get('context', {})
+                    error_text = f"API Error: {error_code}"
+                    if error_context:
+                        error_text += f" - {error_context}"
+                else:
+                    error_text = str(error_msg)
+                raise Exception(error_text)
+        
+            return response.get("result")
     
-        return response.get("result") if isinstance(response, dict) else response
+        return response
 
 
     async def cancel_order(self, product_id: int, order_id: int):
         """Cancel an order"""
-        # ✅ Use DELETE with order_id in path and product_id in body
-        payload = {"product_id": product_id}
-        response = await self._make_request("DELETE", f"/v2/orders", data=payload)
+        # ✅ FIX: Include 'id' in the payload
+        payload = {
+            "id": order_id,
+            "product_id": product_id
+        }
     
-        if isinstance(response, dict) and response.get("error"):
-            raise Exception(f"API Error: {response.get('error')}")
+        response = await self._make_request("DELETE", "/v2/orders", data=payload)
     
-        return response.get("result") if isinstance(response, dict) else response
+        if isinstance(response, dict):
+            if response.get("error") or not response.get("success", True):
+                error_msg = response.get("error", {})
+                raise Exception(f"API Error: {error_msg}")
+        
+            return response.get("result")
+    
+        return response
 
 
     async def get_position(self, product_id: int = None):
