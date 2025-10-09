@@ -207,6 +207,37 @@ def register_handlers():
     )
     ptb.add_handler(strategy_conv_handler)
 
+    
+# ==================== ORDER MANAGEMENT CONVERSATION HANDLER ====================
+    order_management_conv = ConversationHandler(
+        entry_points=[
+            CallbackQueryHandler(show_order_management_menu, pattern="^orders_menu$")
+        ],
+        states={
+            SELECTING_ORDER_API: [
+                CallbackQueryHandler(show_orders_for_api, pattern="^orders_api_")
+            ],
+            VIEWING_ORDERS: [
+                CallbackQueryHandler(view_order_details, pattern="^view_order_"),
+                CallbackQueryHandler(show_orders_for_api, pattern="^orders_api_")
+            ],
+            AWAITING_TRIGGER_PRICE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_trigger_price)
+            ],
+            AWAITING_LIMIT_PRICE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_limit_price)
+            ]
+        },
+        fallbacks=[
+            CallbackQueryHandler(show_order_management_menu, pattern="^orders_menu$"),
+            CommandHandler("cancel", cancel_conversation)
+        ],
+        per_message=False,
+        allow_reentry=True
+    )
+
+    ptb.add_handler(order_management_conv)
+    
     # ==================== TRADE CONVERSATION HANDLER ====================
     
     trade_conv_handler = ConversationHandler(
@@ -265,6 +296,12 @@ def register_handlers():
     
     # Generic callback handlers (LAST - catches everything else)
     ptb.add_handler(CallbackQueryHandler(button_callback))
+
+    ptb.add_handler(CallbackQueryHandler(show_edit_order_menu, pattern="^edit_order_"))
+    ptb.add_handler(CallbackQueryHandler(edit_trigger_price_start, pattern="^edit_trigger_"))
+    ptb.add_handler(CallbackQueryHandler(edit_limit_price_start, pattern="^edit_limit_"))
+    ptb.add_handler(CallbackQueryHandler(sl_to_cost, pattern="^sl_to_cost_"))
+    ptb.add_handler(CallbackQueryHandler(cancel_order, pattern="^cancel_order_"))
     
     # Error handler
     ptb.add_error_handler(error_handler)
