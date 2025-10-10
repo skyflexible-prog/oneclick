@@ -57,8 +57,10 @@ async def create_indexes():
         bot_logger.error(f"Error creating database indexes: {e}")
 
 
+# database/crud.py
+
 async def create_order_state_indexes():
-    """Create indexes for order state tracking (notifications)"""
+    """Create indexes for order state tracking (OPTIMIZED)"""
     try:
         db = Database.get_database()
         
@@ -75,13 +77,19 @@ async def create_order_state_indexes():
             ("updated_at", -1)
         ])
         
-        # TTL index to auto-delete old filled orders after 30 days
+        # ✅ TTL INDEX: Auto-delete filled orders after 7 DAYS
         await db.order_states.create_index(
             [("filled_at", 1)],
+            expireAfterSeconds=604800  # 7 days (was 30 days)
+        )
+        
+        # ✅ ADDITIONAL: Delete old pending orders after 30 days
+        await db.order_states.create_index(
+            [("updated_at", 1)],
             expireAfterSeconds=2592000  # 30 days
         )
         
-        bot_logger.info("✅ Order state indexes created successfully")
+        bot_logger.info("✅ Order state indexes created (optimized)")
     except Exception as e:
         bot_logger.error(f"Error creating order state indexes: {e}")
 
