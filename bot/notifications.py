@@ -183,46 +183,41 @@ class NotificationService:
 class OrderFillTracker:
     """Track order states and detect fills"""
     
+    # bot/notifications.py
+
     @staticmethod
     async def check_order_fills(user_id: int, api_id: str, current_orders: List[Dict]):
         """
         Check for order fills by comparing current orders with stored state
-        
-        Args:
-            user_id: Telegram user ID
-            api_id: API credential ID
-            current_orders: Current open orders from exchange
-        
-        Returns:
-            List of filled orders
+    
+        OPTIMIZED: Stores minimal data, auto-cleans after 7 days
         """
         try:
             db = Database.get_database()
             
-            # Get stored order states
+            # Get stored order states (only IDs, no full order data)
             stored_orders = await db.order_states.find({
                 'user_id': user_id,
                 'api_id': api_id,
                 'state': 'pending'
             }).to_list(None)
-            
+        
             filled_orders = []
-            
-            # Check which orders are no longer in current orders (filled or cancelled)
+        
+            # Check which orders are no longer in current orders
             stored_order_ids = {order['order_id'] for order in stored_orders}
             current_order_ids = {order.get('id') for order in current_orders}
-            
+        
             potentially_filled = stored_order_ids - current_order_ids
-            
+        
             for filled_id in potentially_filled:
-                # Find the stored order
                 stored_order = next(
                     (o for o in stored_orders if o['order_id'] == filled_id), 
                     None
                 )
-                
+            
                 if stored_order:
-                    # Mark as filled
+                    # ✅ OPTIMIZED: Mark as filled and DELETE after notification
                     await db.order_states.update_one(
                         {'_id': stored_order['_id']},
                         {
@@ -234,8 +229,18 @@ class OrderFillTracker:
                     )
                     
                     filled_orders.append(stored_order)
-            
-            # Update current order states
+                
+                    # ✅ DELETE filled order after 1 hour (immediate cleanup)
+                    await db.order_states.update_one(
+                        {'_id': stored_order['_id']},
+                        {
+                            '$set': {
+                                'delete_at': datetime.utcnow() + timedelta(hours=1)
+                            }
+                        }
+                    )
+        
+            # ✅ OPTIMIZED: Store only essential data (no full order object)
             for order in current_orders:
                 await db.order_states.update_one(
                     {
@@ -249,19 +254,25 @@ class OrderFillTracker:
                             'api_id': api_id,
                             'order_id': order.get('id'),
                             'state': order.get('state', 'pending'),
-                            'order_data': order,
+                            # ✅ Store ONLY essential fields
+                            'order_type': order.get('stop_order_type', 'entry'),
+                            'symbol': order.get('product_symbol'),
+                            'side': order.get('side'),
+                            'size': order.get('size'),
+                            'price': order.get('stop_price') or order.get('limit_price'),
+                            'reduce_only': order.get('reduce_only', False),
                             'updated_at': datetime.utcnow()
                         }
                     },
                     upsert=True
                 )
-            
+        
             return filled_orders
-            
+        
         except Exception as e:
             bot_logger.error(f"Error checking order fills: {e}")
             return []
-    
+
     @staticmethod
     def determine_fill_type(order: Dict) -> str:
         """Determine if order is entry, stop-loss, or take-profit"""
