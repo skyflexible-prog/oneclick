@@ -269,3 +269,23 @@ async def update_trade_status(db: AsyncIOMotorDatabase, trade_id: ObjectId, stat
         bot_logger.error(f"Error updating trade status: {e}")
         return False
         
+
+# database/crud.py
+
+async def create_order_state_indexes():
+    """Create indexes for order state tracking"""
+    db = Database.get_database()
+    
+    await db.order_states.create_index([
+        ("user_id", 1),
+        ("api_id", 1),
+        ("order_id", 1)
+    ], unique=True)
+    
+    await db.order_states.create_index([
+        ("state", 1),
+        ("updated_at", -1)
+    ])
+    
+    bot_logger.info("Order state indexes created")
+ 
