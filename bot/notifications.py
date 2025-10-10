@@ -1,4 +1,4 @@
-# bot/notifications.py - FIXED VERSION
+# bot/notifications.py - COMPLETE FIX
 
 from telegram import Bot
 from telegram.constants import ParseMode
@@ -22,15 +22,24 @@ class NotificationService:
     ):
         """Send notification when an order is filled"""
         try:
-            # ✅ FIXED: Map fields from stored order data
-            symbol = order.get('symbol', 'N/A')
-            side = order.get('side', 'N/A').upper()
-            price = float(order.get('price') or 0)
-            size = int(order.get('size') or 0)
-            order_type = order.get('order_type', 'N/A')
+            # ✅ FIXED: Get fields from stored MongoDB document
+            symbol = order.get('symbol') or 'N/A'
+            side = (order.get('side') or 'N/A').upper()
             
-            # Log for debugging
-            bot_logger.info(f"Notification data: symbol={symbol}, side={side}, price={price}, size={size}, type={order_type}")
+            # Try multiple price fields
+            price = order.get('price')
+            if not price or price == 0:
+                price = order.get('stop_price')
+            if not price or price == 0:
+                price = order.get('limit_price')
+            price = float(price) if price else 0.0
+            
+            size = int(order.get('size') or 0)
+            order_type = order.get('order_type') or 'N/A'
+            
+            # Enhanced logging
+            bot_logger.info(f"📊 Notification fields: symbol={symbol}, side={side}, price={price}, size={size}, order_type={order_type}")
+            bot_logger.info(f"📋 Full order data: {order}")
             
             # Determine emoji based on fill type
             emoji_map = {
@@ -99,7 +108,7 @@ class OrderFillTracker:
                 'state': 'pending'
             }).to_list(None)
             
-            bot_logger.info(f"Found {len(stored_orders)} pending orders in database")
+            bot_logger.info(f"📊 Found {len(stored_orders)} pending orders in database")
             
             filled_orders = []
             
@@ -109,7 +118,8 @@ class OrderFillTracker:
             
             potentially_filled = stored_order_ids - current_order_ids
             
-            bot_logger.info(f"Potentially filled orders: {potentially_filled}")
+            if potentially_filled:
+                bot_logger.info(f"🔍 Potentially filled orders: {potentially_filled}")
             
             for filled_id in potentially_filled:
                 stored_order = next(
@@ -118,6 +128,9 @@ class OrderFillTracker:
                 )
                 
                 if stored_order:
+                    # Log stored order details
+                    bot_logger.info(f"📋 Stored order details: {stored_order}")
+                    
                     # Mark as filled
                     await db.order_states.update_one(
                         {'_id': stored_order['_id']},
@@ -130,12 +143,33 @@ class OrderFillTracker:
                     )
                     
                     filled_orders.append(stored_order)
-                    bot_logger.info(f"✅ Detected filled order: {filled_id} - {stored_order.get('symbol')}")
+                    bot_logger.info(f"✅ Marked order as filled: {filled_id} - {stored_order.get('symbol')}")
             
-            # Update/insert current order states (minimal data)
+            # Update/insert current order states with FULL data
             for order in current_orders:
                 order_id = order.get('id')
                 symbol = order.get('product_symbol')
+                side = order.get('side')
+                size = order.get('size')
+                
+                # Get price (try multiple fields)
+                price = order.get('stop_price') or order.get('limit_price') or order.get('average_fill_price')
+                
+                order_data = {
+                    'user_id': user_id,
+                    'api_id': api_id,
+                    'order_id': order_id,
+                    'state': order.get('state', 'pending'),
+                    'order_type': order.get('stop_order_type', 'entry'),
+                    'symbol': symbol,
+                    'side': side,
+                    'size': size,
+                    'price': price,
+                    'stop_price': order.get('stop_price'),
+                    'limit_price': order.get('limit_price'),
+                    'reduce_only': order.get('reduce_only', False),
+                    'updated_at': datetime.utcnow()
+                }
                 
                 await db.order_states.update_one(
                     {
@@ -143,25 +177,11 @@ class OrderFillTracker:
                         'api_id': api_id,
                         'order_id': order_id
                     },
-                    {
-                        '$set': {
-                            'user_id': user_id,
-                            'api_id': api_id,
-                            'order_id': order_id,
-                            'state': order.get('state', 'pending'),
-                            'order_type': order.get('stop_order_type', 'entry'),
-                            'symbol': symbol,
-                            'side': order.get('side'),
-                            'size': order.get('size'),
-                            'price': order.get('stop_price') or order.get('limit_price') or order.get('average_fill_price'),
-                            'reduce_only': order.get('reduce_only', False),
-                            'updated_at': datetime.utcnow()
-                        }
-                    },
+                    {'$set': order_data},
                     upsert=True
                 )
                 
-                bot_logger.info(f"📝 Updated order state: {order_id} - {symbol}")
+                bot_logger.info(f"📝 Updated order state: {order_id} - {symbol} @ ${price}")
             
             return filled_orders
             
@@ -177,7 +197,7 @@ class OrderFillTracker:
         order_type = order.get('order_type', '')
         reduce_only = order.get('reduce_only', False)
         
-        bot_logger.info(f"Determining fill type: order_type={order_type}, reduce_only={reduce_only}")
+        bot_logger.info(f"🔍 Determining fill type: order_type={order_type}, reduce_only={reduce_only}")
         
         if reduce_only:
             if 'stop_loss' in order_type.lower():
