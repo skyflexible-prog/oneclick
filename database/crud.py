@@ -1,4 +1,4 @@
- # database/crud.py
+# database/crud.py
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from bson import ObjectId
@@ -10,6 +10,80 @@ from database.models import (
 )
 from config.database import Database
 from utils.logger import bot_logger
+
+
+# ==================== INDEX CREATION ====================
+
+async def create_indexes():
+    """Create database indexes for performance optimization"""
+    try:
+        db = Database.get_database()
+        
+        # Users indexes
+        await db.users.create_index([("telegram_id", 1)], unique=True)
+        await db.users.create_index([("created_at", -1)])
+        
+        # API credentials indexes
+        await db.api_credentials.create_index([("user_id", 1)])
+        await db.api_credentials.create_index([("is_active", 1)])
+        await db.api_credentials.create_index([
+            ("user_id", 1),
+            ("is_active", 1)
+        ])
+        
+        # Strategies indexes
+        await db.strategies.create_index([("user_id", 1)])
+        await db.strategies.create_index([("strategy_name", 1)])
+        await db.strategies.create_index([
+            ("user_id", 1),
+            ("created_at", -1)
+        ])
+        
+        # Trades indexes
+        await db.trades.create_index([("user_id", 1)])
+        await db.trades.create_index([("status", 1)])
+        await db.trades.create_index([("created_at", -1)])
+        await db.trades.create_index([
+            ("user_id", 1),
+            ("status", 1)
+        ])
+        
+        # Orders indexes
+        await db.orders.create_index([("trade_id", 1)])
+        await db.orders.create_index([("timestamp", -1)])
+        
+        bot_logger.info("✅ Database indexes created successfully")
+    except Exception as e:
+        bot_logger.error(f"Error creating database indexes: {e}")
+
+
+async def create_order_state_indexes():
+    """Create indexes for order state tracking (notifications)"""
+    try:
+        db = Database.get_database()
+        
+        # Compound index for order lookup
+        await db.order_states.create_index([
+            ("user_id", 1),
+            ("api_id", 1),
+            ("order_id", 1)
+        ], unique=True)
+        
+        # Index for state queries
+        await db.order_states.create_index([
+            ("state", 1),
+            ("updated_at", -1)
+        ])
+        
+        # TTL index to auto-delete old filled orders after 30 days
+        await db.order_states.create_index(
+            [("filled_at", 1)],
+            expireAfterSeconds=2592000  # 30 days
+        )
+        
+        bot_logger.info("✅ Order state indexes created successfully")
+    except Exception as e:
+        bot_logger.error(f"Error creating order state indexes: {e}")
 
 
 # ==================== USER OPERATIONS ====================
@@ -224,6 +298,19 @@ async def close_trade(
     )
 
 
+async def update_trade_status(db: AsyncIOMotorDatabase, trade_id: ObjectId, status: str):
+    """Update trade status"""
+    try:
+        result = await db.trades.update_one(
+            {'_id': ObjectId(trade_id)},
+            {'$set': {'status': status}}
+        )
+        return result.modified_count > 0
+    except Exception as e:
+        bot_logger.error(f"Error updating trade status: {e}")
+        return False
+
+
 # ==================== ORDER OPERATIONS ====================
 
 async def create_order(db: AsyncIOMotorDatabase, order_data: Dict) -> str:
@@ -256,37 +343,4 @@ async def update_order_status(db: AsyncIOMotorDatabase, order_id: str, status: s
         {"_id": ObjectId(order_id)},
         {"$set": update_data}
     )
-
-
-async def update_trade_status(db: AsyncIOMotorDatabase, trade_id: ObjectId, status: str):
-    """Update trade status"""
-    try:
-        result = await db.trades.update_one(
-            {'_id': ObjectId(trade_id)},
-            {'$set': {'status': status}}
-        )
-        return result.modified_count > 0
-    except Exception as e:
-        bot_logger.error(f"Error updating trade status: {e}")
-        return False
-        
-
-# database/crud.py
-
-async def create_order_state_indexes():
-    """Create indexes for order state tracking"""
-    db = Database.get_database()
-    
-    await db.order_states.create_index([
-        ("user_id", 1),
-        ("api_id", 1),
-        ("order_id", 1)
-    ], unique=True)
-    
-    await db.order_states.create_index([
-        ("state", 1),
-        ("updated_at", -1)
-    ])
-    
-    bot_logger.info("Order state indexes created")
  
