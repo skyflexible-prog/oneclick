@@ -16,7 +16,8 @@ import uvicorn
 from datetime import datetime
 
 from config.settings import settings
-from config.database import Database, create_indexes
+from config.database import Database
+from database.crud import create_indexes, create_order_state_indexes  # ✅ UPDATED IMPORT
 from bot.handlers import (
     start_command,
     help_command,
@@ -77,7 +78,7 @@ from bot.handlers import (
     CONFIRMING_TRADE
 )
 
-# ✅ ADD ORDER MANAGEMENT IMPORTS
+# ✅ ORDER MANAGEMENT IMPORTS
 from bot.order_management import (
     show_order_management_menu,
     show_orders_for_api,
@@ -116,6 +117,7 @@ async def lifespan(_: FastAPI):
     
     try:
         await create_indexes()
+        await create_order_state_indexes()  # ✅ CREATE ORDER STATE INDEXES
         bot_logger.info("✅ Database indexes created/verified")
     except Exception as e:
         bot_logger.error(f"Error creating indexes: {e}")
@@ -286,7 +288,13 @@ async def root():
     return {
         "status": "running",
         "bot": "ATM Straddle Trading Bot",
-        "version": "1.0.0"
+        "version": "1.0.0",
+        "features": [
+            "Order Management",
+            "Order Fill Notifications",
+            "SL to Cost",
+            "Strategy Execution"
+        ]
     }
 
 
@@ -336,11 +344,17 @@ async def stats():
         trade_count = await db.trades.count_documents({})
         open_positions = await db.trades.count_documents({"status": "open"})
         
+        # ✅ ADD ORDER NOTIFICATION STATS
+        pending_orders = await db.order_states.count_documents({"state": "pending"})
+        filled_orders = await db.order_states.count_documents({"state": "filled"})
+        
         return {
             "users": user_count,
             "strategies": strategy_count,
             "total_trades": trade_count,
-            "open_positions": open_positions
+            "open_positions": open_positions,
+            "pending_orders": pending_orders,
+            "filled_orders_tracked": filled_orders
         }
     except Exception as e:
         bot_logger.error(f"Error fetching stats: {e}")
