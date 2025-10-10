@@ -9,7 +9,7 @@ from utils.helpers import encryptor
 from utils.logger import bot_logger
 from trading.delta_api import DeltaExchangeAPI
 from typing import Dict, List
-
+from bot.notifications import NotificationService, OrderFillTracker  # ✅ ADD THIS IMPORT
 
 # ==================== ORDER MANAGEMENT STATES ====================
 SELECTING_ORDER_API = 100
@@ -78,6 +78,7 @@ async def show_orders_for_api(update: Update, context: ContextTypes.DEFAULT_TYPE
     await query.answer()
     
     api_id = query.data.split('_')[-1]
+    user_id = query.from_user.id  # ✅ ADD THIS
     
     db = Database.get_database()
     api_data = await crud.get_api_credential_by_id(db, api_id)
@@ -99,6 +100,29 @@ async def show_orders_for_api(update: Update, context: ContextTypes.DEFAULT_TYPE
     try:
         async with DeltaExchangeAPI(api_key, api_secret) as delta_api:
             orders = await delta_api.get_open_orders()
+        
+        # ✅ CHECK FOR FILLED ORDERS AND SEND NOTIFICATIONS
+        try:
+            filled_orders = await OrderFillTracker.check_order_fills(
+                user_id=user_id,
+                api_id=api_id,
+                current_orders=orders if orders else []
+            )
+            
+            # Send notifications for filled orders
+            if filled_orders:
+                notification_service = NotificationService(context.bot)
+                for filled_order in filled_orders:
+                    fill_type = OrderFillTracker.determine_fill_type(filled_order)
+                    await notification_service.send_order_fill_notification(
+                        user_id=user_id,
+                        order=filled_order.get('order_data', {}),
+                        fill_type=fill_type
+                    )
+                    bot_logger.info(f"Sent {fill_type} notification for order {filled_order.get('order_id')}")
+        except Exception as notif_error:
+            bot_logger.error(f"Error checking/sending fill notifications: {notif_error}")
+            # Don't fail the whole function if notifications fail
         
         if not orders or len(orders) == 0:
             await query.edit_message_text(
