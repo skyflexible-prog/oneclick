@@ -8,6 +8,7 @@ from database.models import (
     UserModel, APICredentialModel, StrategyModel, 
     TradeModel, OrderModel
 )
+from config.database import Database
 from utils.logger import bot_logger
 
 
