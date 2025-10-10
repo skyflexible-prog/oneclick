@@ -56,13 +56,19 @@ async def create_indexes():
     except Exception as e:
         bot_logger.error(f"Error creating database indexes: {e}")
 
-
-# database/crud.py
+# database/crud.py - FIXED VERSION
 
 async def create_order_state_indexes():
     """Create indexes for order state tracking (OPTIMIZED)"""
     try:
         db = Database.get_database()
+        
+        # ✅ FIX: Drop old index first
+        try:
+            await db.order_states.drop_index("filled_at_1")
+            bot_logger.info("Dropped old filled_at_1 index")
+        except Exception:
+            pass  # Index might not exist yet
         
         # Compound index for order lookup
         await db.order_states.create_index([
@@ -80,10 +86,10 @@ async def create_order_state_indexes():
         # ✅ TTL INDEX: Auto-delete filled orders after 7 DAYS
         await db.order_states.create_index(
             [("filled_at", 1)],
-            expireAfterSeconds=604800  # 7 days (was 30 days)
+            expireAfterSeconds=604800  # 7 days
         )
         
-        # ✅ ADDITIONAL: Delete old pending orders after 30 days
+        # ✅ TTL INDEX: Delete old pending orders after 30 days
         await db.order_states.create_index(
             [("updated_at", 1)],
             expireAfterSeconds=2592000  # 30 days
