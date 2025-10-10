@@ -595,7 +595,7 @@ async def receive_limit_price(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 async def sl_to_cost(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Move stop-loss to cost (entry price with buffer)"""
+    """Move stop-loss to cost (entry price with 2% limit buffer)"""
     query = update.callback_query
     await query.answer()
     
@@ -656,17 +656,18 @@ async def sl_to_cost(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 return VIEWING_ORDERS
             
-            # Check if already profitable
+            # ✅ NEW LOGIC: Trigger = Entry, Limit = 2% from trigger
             if position_size < 0:
+                # SHORT POSITION: Check if profitable (mark < entry)
                 already_profitable = mark_price < entry_price
                 if already_profitable:
-                    new_stop = entry_price * 1.01
-                    new_limit = entry_price * 1.02
+                    new_stop = entry_price  # ✅ EXACTLY at entry
+                    new_limit = entry_price * 1.02  # ✅ 2% ABOVE entry (for shorts)
                 else:
                     await query.edit_message_text(
                         f"⚠️ <b>Cannot move SL to cost yet</b>\n\n"
-                        f"<b>Entry:</b> ${entry_price}\n"
-                        f"<b>Current:</b> ${mark_price}\n\n"
+                        f"<b>Entry:</b> ${entry_price:.2f}\n"
+                        f"<b>Current:</b> ${mark_price:.2f}\n\n"
                         f"Position is still in loss. Wait for profit before moving SL to cost.",
                         parse_mode=ParseMode.HTML,
                         reply_markup=InlineKeyboardMarkup([[
@@ -675,15 +676,16 @@ async def sl_to_cost(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     )
                     return VIEWING_ORDERS
             else:
+                # LONG POSITION: Check if profitable (mark > entry)
                 already_profitable = mark_price > entry_price
                 if already_profitable:
-                    new_stop = entry_price * 0.99
-                    new_limit = entry_price * 0.98
+                    new_stop = entry_price  # ✅ EXACTLY at entry
+                    new_limit = entry_price * 0.98  # ✅ 2% BELOW entry (for longs)
                 else:
                     await query.edit_message_text(
                         f"⚠️ <b>Cannot move SL to cost yet</b>\n\n"
-                        f"<b>Entry:</b> ${entry_price}\n"
-                        f"<b>Current:</b> ${mark_price}\n\n"
+                        f"<b>Entry:</b> ${entry_price:.2f}\n"
+                        f"<b>Current:</b> ${mark_price:.2f}\n\n"
                         f"Position is still in loss. Wait for profit before moving SL to cost.",
                         parse_mode=ParseMode.HTML,
                         reply_markup=InlineKeyboardMarkup([[
@@ -710,10 +712,10 @@ async def sl_to_cost(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(
             f"✅ <b>SL Moved to Cost!</b>\n\n"
             f"<b>Position Size:</b> {position_size}\n"
-            f"<b>Entry Price:</b> ${entry_price}\n"
-            f"<b>Current Price:</b> ${mark_price}\n"
-            f"<b>New Trigger:</b> ${new_stop}\n"
-            f"<b>New Limit:</b> ${new_limit}\n\n"
+            f"<b>Entry Price:</b> ${entry_price:.2f}\n"
+            f"<b>Current Price:</b> ${mark_price:.2f}\n"
+            f"<b>New Trigger:</b> ${new_stop:.2f}\n"
+            f"<b>New Limit:</b> ${new_limit:.2f}\n\n"
             f"Your stop-loss is now at breakeven.",
             parse_mode=ParseMode.HTML,
             reply_markup=InlineKeyboardMarkup([[
@@ -738,7 +740,7 @@ async def sl_to_cost(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ]])
         )
         return VIEWING_ORDERS
-
+            
 
 async def cancel_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Cancel selected order"""
