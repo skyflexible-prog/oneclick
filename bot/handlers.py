@@ -559,7 +559,7 @@ async def delete_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ==================== CALLBACK QUERY HANDLERS ====================
 
-# bot/handlers.py - UPDATE button_callback
+# bot/handlers.py - FIX THE button_callback FUNCTION
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle all button callbacks"""
@@ -567,20 +567,20 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     
     data = query.data
-    bot_logger.info(f"🔘 Button callback: {data}")  # ✅ DEBUG LOG
+    bot_logger.info(f"🔘 Button callback: {data}")  # DEBUG LOG
     
     # Main menu
     if data == "main_menu":
         await query.edit_message_text(
-            "🏠 <b>Main Menu</b>\n\n"
-            "Select an option:",
+            "🏠 <b>Main Menu</b>\n\nSelect an option:",
             parse_mode=ParseMode.HTML,
-            reply_markup=get_main_menu_keyboard()  # ✅ USE UPDATED KEYBOARD
+            reply_markup=get_main_menu_keyboard()
         )
         return
     
-    # ✅ ADD THIS - Strangle Menu Handler
+    # ✅ STRANGLE MENU
     elif data == "strangle_menu":
+        bot_logger.info("🎲 Showing Strangle menu")
         
         strangle_text = (
             "🎲 <b>Strangle Strategy</b>\n\n"
@@ -606,12 +606,12 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
         return
-
-    # ✅ SKIP strangle action callbacks - let ConversationHandler handle them
+    
+    # ✅ SKIP strangle action callbacks - DON'T HANDLE THEM HERE
     elif data in ["strangle_create", "strangle_execute", "strangle_manage"]:
-        # Don't return - let the handler chain continue
-        pass
-        
+        # Let ConversationHandler process these
+        return  # ✅ ADD RETURN HERE - DON'T CONTINUE TO FALLBACK
+    
     # Help
     elif data == "help":
         help_text = (
@@ -633,7 +633,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• <b>Trade:</b> Execute preset strategies\n"
             "• <b>Orders:</b> View and manage orders\n"
             "• <b>Positions:</b> Monitor open positions\n"
-            "• <b>Strangle:</b> Create strangle strategies\n"  # ✅ MENTIONED
+            "• <b>Strangle:</b> Create strangle strategies\n"
             "• <b>History:</b> View past trades\n"
             "• <b>Balance:</b> Check account balance\n\n"
             "<b>Need help?</b> Contact support."
@@ -650,7 +650,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     
-    # If no match, show main menu
+    # ✅ FALLBACK - Only reached if no match above
     await query.edit_message_text(
         "Please select an option:",
         reply_markup=get_main_menu_keyboard()
