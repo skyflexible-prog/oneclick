@@ -653,4 +653,72 @@ class DeltaExchangeAPI:
         except Exception as e:
             api_logger.error(f"Error placing stop-loss order: {e}", exc_info=True)
             return {'error': str(e)}
-                        
+
+
+# trading/delta_api.py - ADD THESE METHODS TO THE END OF THE CLASS
+
+    async def place_stop_loss_order(
+        self,
+        symbol: str,
+        side: str,
+        size: int,
+        stop_price: float,
+        limit_price: float
+    ) -> Dict:
+        """
+        Place stop-loss order specifically for strangle strategy
+        
+        Args:
+            symbol: Product symbol
+            side: 'buy' or 'sell'
+            size: Number of contracts
+            stop_price: Trigger price
+            limit_price: Limit price after trigger
+        
+        Returns:
+            Order response
+        """
+        try:
+            # Use the existing place_stop_limit_order method
+            return await self.place_stop_limit_order(
+                product_symbol=symbol,
+                side=side,
+                size=size,
+                stop_price=str(stop_price),
+                limit_price=str(limit_price),
+                reduce_only=True
+            )
+        except Exception as e:
+            api_logger.error(f"Error placing stop-loss order: {e}")
+            return {"error": str(e)}
+    
+    
+    async def get_ticker(self, symbol: str) -> Dict:
+        """
+        Get ticker data for a specific symbol
+        Wrapper for get_ticker_by_symbol for compatibility
+        
+        Args:
+            symbol: Product symbol
+        
+        Returns:
+            Ticker data
+        """
+        try:
+            ticker = await self.get_ticker_by_symbol(symbol)
+            if ticker:
+                return {
+                    "success": True,
+                    "result": ticker
+                }
+            return {
+                "success": False,
+                "error": "No ticker data found"
+            }
+        except Exception as e:
+            api_logger.error(f"Error getting ticker: {e}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
+            
