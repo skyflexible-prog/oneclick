@@ -182,10 +182,19 @@ async def set_active_api(db: AsyncIOMotorDatabase, user_id: str, api_id: str):
         {"$set": {"is_active": True}}
     )
 
-async def delete_api_credential(db: AsyncIOMotorDatabase, api_id: str):
-    """Delete API credential"""
-    await db.api_credentials.delete_one({"_id": ObjectId(api_id)})
-
+async def delete_api_credential(db, user_id: str, api_id):
+    """Delete API credential with user verification"""
+    from bson import ObjectId
+    
+    if isinstance(api_id, str):
+        api_id = ObjectId(api_id)
+    
+    result = await db.api_credentials.delete_one({
+        "_id": api_id,
+        "user_id": user_id  # ← Security check
+    })
+    
+    return result.deleted_count > 0
 
 # ==================== STRATEGY OPERATIONS ====================
 
