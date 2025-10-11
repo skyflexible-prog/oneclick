@@ -763,7 +763,7 @@ async def manage_strangle_presets(update: Update, context: ContextTypes.DEFAULT_
     query = update.callback_query
     await query.answer()
     
-    user_id = query.from_user.id
+    user_id = str(query.from_user.id)  # ✅ Convert to string
     db = Database.get_database()
     
     # Get user's strangle presets
