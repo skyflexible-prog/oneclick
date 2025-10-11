@@ -716,9 +716,6 @@ async def delete_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         bot_logger.error(f"❌ Delete API failed: {e}")
         await query.answer(f"❌ Delete failed: {str(e)}", show_alert=True)
 
-# ==================== CALLBACK QUERY HANDLERS ====================
-
-# bot/handlers.py - REPLACE ENTIRE button_callback FUNCTION
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle all button callbacks"""
@@ -737,170 +734,23 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     
-    # Trade button
-    elif data == "trade":
-        db = Database.get_database()
-        user_id = str(query.from_user.id)  # ✅ FIX
-        
-        bot_logger.info(f"📊 Trade button: user={user_id}")
-        
-        # Check for APIs
-        apis = await crud.get_user_api_credentials(db, user_id)
-        
-        if not apis:
-            await query.edit_message_text(
-                "⚠️ <b>No API Credentials</b>\n\n"
-                "Please add your Delta Exchange API credentials first.\n\n"
-                "Go to: 🔑 API Keys → ➕ Add New API",
-                parse_mode=ParseMode.HTML,
-                reply_markup=get_main_menu_keyboard()
-            )
-            return
-        
-        # Continue with trade flow (existing code)
+    # API menu
+    elif data == "api_menu":
         await query.edit_message_text(
-            "📊 <b>Trade</b>\n\nSelect strategy...",
-            parse_mode=ParseMode.HTML
+            "🔑 <b>API Management</b>\n\nManage your Delta Exchange API keys:",
+            parse_mode=ParseMode.HTML,
+            reply_markup=get_api_management_keyboard()
         )
         return
     
-    # Orders button
-    elif data == "orders":
-        db = Database.get_database()
-        user_id = str(query.from_user.id)  # ✅ FIX
-        
-        bot_logger.info(f"📋 Orders button: user={user_id}")
-        
-        # Check for active API
-        api = await crud.get_active_api(db, user_id)
-        
-        if not api:
-            await query.edit_message_text(
-                "⚠️ <b>No API Credentials</b>\n\n"
-                "Please add your Delta Exchange API credentials first.\n\n"
-                "Go to: 🔑 API Keys → ➕ Add New API",
-                parse_mode=ParseMode.HTML,
-                reply_markup=get_main_menu_keyboard()
-            )
-            return
-        
-        await query.edit_message_text(
-            "📋 <b>Orders</b>\n\nFetching orders...",
-            parse_mode=ParseMode.HTML,
-            reply_markup=get_main_menu_keyboard()
-        )
+    # List APIs
+    elif data == "list_apis":
+        await list_apis(update, context)
         return
     
-    # Positions button
-    elif data == "positions":
-        db = Database.get_database()
-        user_id = str(query.from_user.id)  # ✅ FIX
-        
-        bot_logger.info(f"📊 Positions button: user={user_id}")
-        
-        # Check for active API
-        api = await crud.get_active_api(db, user_id)
-        
-        if not api:
-            await query.edit_message_text(
-                "⚠️ <b>No API Credentials</b>\n\n"
-                "Please add your Delta Exchange API credentials first.\n\n"
-                "Go to: 🔑 API Keys → ➕ Add New API",
-                parse_mode=ParseMode.HTML,
-                reply_markup=get_main_menu_keyboard()
-            )
-            return
-        
-        await query.edit_message_text(
-            "📊 <b>Positions</b>\n\nFetching positions...",
-            parse_mode=ParseMode.HTML,
-            reply_markup=get_main_menu_keyboard()
-        )
-        return
-    
-    # History button
-    elif data == "history":
-        db = Database.get_database()
-        user_id = str(query.from_user.id)  # ✅ FIX
-        
-        bot_logger.info(f"📜 History button: user={user_id}")
-        
-        # Get closed trades
-        trades = await crud.get_user_trades(db, user_id, status="closed")
-        
-        if not trades:
-            await query.edit_message_text(
-                "📜 <b>Trade History</b>\n\nNo closed trades yet.",
-                parse_mode=ParseMode.HTML,
-                reply_markup=get_main_menu_keyboard()
-            )
-            return
-        
-        message = "📜 <b>Trade History</b>\n\n"
-        message += f"Found {len(trades)} closed trade(s)."
-        
-        await query.edit_message_text(
-            message,
-            parse_mode=ParseMode.HTML,
-            reply_markup=get_main_menu_keyboard()
-        )
-        return
-    
-    # Balance button
-    elif data == "balance":
-        db = Database.get_database()
-        user_id = str(query.from_user.id)  # ✅ FIX
-        
-        bot_logger.info(f"💰 Balance button: user={user_id}")
-        
-        # Check for active API
-        api = await crud.get_active_api(db, user_id)
-        
-        if not api:
-            await query.edit_message_text(
-                "⚠️ <b>No API Credentials</b>\n\n"
-                "Please add your Delta Exchange API credentials first.\n\n"
-                "Go to: 🔑 API Keys → ➕ Add New API",
-                parse_mode=ParseMode.HTML,
-                reply_markup=get_main_menu_keyboard()
-            )
-            return
-        
-        await query.edit_message_text(
-            "💰 <b>Balance</b>\n\nFetching balance...",
-            parse_mode=ParseMode.HTML,
-            reply_markup=get_main_menu_keyboard()
-        )
-        return
-    
-    # Strategies button
-    elif data == "strategies":
-        db = Database.get_database()
-        user_id = str(query.from_user.id)  # ✅ FIX
-        
-        bot_logger.info(f"⚙️ Strategies button: user={user_id}")
-        
-        # Get strategies
-        strategies = await crud.get_user_strategies(db, user_id)
-        
-        if not strategies:
-            await query.edit_message_text(
-                "⚠️ <b>No Strategies Found</b>\n\n"
-                "Create a strategy first.\n\n"
-                "Go to: 🎲 Strangle → 📝 Create Preset",
-                parse_mode=ParseMode.HTML,
-                reply_markup=get_main_menu_keyboard()
-            )
-            return
-        
-        message = "⚙️ <b>Your Strategies</b>\n\n"
-        message += f"Found {len(strategies)} strategy(ies)."
-        
-        await query.edit_message_text(
-            message,
-            parse_mode=ParseMode.HTML,
-            reply_markup=get_main_menu_keyboard()
-        )
+    # Add API
+    elif data == "add_api":
+        await add_api(update, context)
         return
     
     # Strangle menu
@@ -932,25 +782,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     
-    # API menu
-    elif data == "api_menu":
-        await query.edit_message_text(
-            "🔑 <b>API Management</b>\n\nManage your Delta Exchange API keys:",
-            parse_mode=ParseMode.HTML,
-            reply_markup=get_api_management_keyboard()
-        )
-        return
-    
-    # List APIs
-    elif data == "list_apis":
-        await list_apis(update, context)  # Already fixed ✅
-        return
-    
-    # Add API
-    elif data == "add_api":
-        await add_api(update, context)  # Already fixed ✅
-        return
-    
     # Help
     elif data == "help":
         help_text = (
@@ -968,13 +799,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "   • Click 'Trade'\n"
             "   • Select your strategy\n"
             "   • Confirm execution\n\n"
-            "<b>📊 Features:</b>\n"
-            "• <b>Trade:</b> Execute preset strategies\n"
-            "• <b>Orders:</b> View and manage orders\n"
-            "• <b>Positions:</b> Monitor open positions\n"
-            "• <b>Strangle:</b> Create strangle strategies\n"
-            "• <b>History:</b> View past trades\n"
-            "• <b>Balance:</b> Check account balance\n\n"
             "<b>Need help?</b> Contact support."
         )
         
@@ -989,16 +813,12 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     
-    # Fallback - Only if no match above
-    if not data.startswith("strangle_") and not data.startswith("activate_api_") and not data.startswith("delete_api_"):
-        await query.edit_message_text(
-            "Please select an option:",
-            reply_markup=get_main_menu_keyboard()
-        )
+    # Fallback
+    await query.edit_message_text(
+        "Please select an option:",
+        reply_markup=get_main_menu_keyboard()
+    )
 
-# ==================== STRATEGY MANAGEMENT HANDLERS ====================
-
-# bot/handlers.py - REPLACE create_strategy_start FUNCTION
 
 async def create_strategy_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Start strategy creation conversation"""
