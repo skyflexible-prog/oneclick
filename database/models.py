@@ -1,214 +1,92 @@
-# database/models.py
-
-from pydantic import BaseModel, Field
-from typing import Dict, Optional
 from datetime import datetime
-from bson import ObjectId
+from typing import Optional, Dict, Any
 
+class UserModel:
+    @staticmethod
+    def create(telegram_id: int, username: str, first_name: str) -> Dict[str, Any]:
+        return {
+            'telegram_id': telegram_id,
+            'username': username,
+            'first_name': first_name,
+            'created_at': datetime.utcnow(),
+            'is_active': True,
+            'daily_loss_limit_pct': 10.0,
+            'max_loss_per_trade_pct': 5.0
+        }
 
-class PyObjectId(str):
-    """Custom ObjectId type for Pydantic v2"""
-    
-    @classmethod
-    def __get_pydantic_core_schema__(cls, _source_type, _handler):
-        from pydantic_core import core_schema
+class APICredentialModel:
+    @staticmethod
+    def create(user_id: str, nickname: str, api_key_encrypted: bytes, 
+               api_secret_encrypted: bytes) -> Dict[str, Any]:
+        return {
+            'user_id': user_id,
+            'nickname': nickname,
+            'api_key_encrypted': api_key_encrypted,
+            'api_secret_encrypted': api_secret_encrypted,
+            'is_active': True,
+            'created_at': datetime.utcnow()
+        }
+
+class StrategyModel:
+    @staticmethod
+    def create(user_id: str, api_id: str, name: str, strategy_type: str,
+               lot_size: int, direction: str, **kwargs) -> Dict[str, Any]:
+        base = {
+            'user_id': user_id,
+            'api_id': api_id,
+            'name': name,
+            'strategy_type': strategy_type,  # 'straddle' or 'strangle'
+            'lot_size': lot_size,
+            'direction': direction,  # 'long' or 'short'
+            'stop_loss_pct': kwargs.get('stop_loss_pct', 20.0),
+            'target_pct': kwargs.get('target_pct'),
+            'expiry_type': kwargs.get('expiry_type', 'weekly'),
+            'strike_offset': kwargs.get('strike_offset', 0),
+            'max_capital': kwargs.get('max_capital'),
+            'trailing_sl': kwargs.get('trailing_sl', False),
+            'created_at': datetime.utcnow()
+        }
         
-        return core_schema.union_schema([
-            core_schema.is_instance_schema(ObjectId),
-            core_schema.chain_schema([
-                core_schema.str_schema(),
-                core_schema.no_info_plain_validator_function(cls.validate),
-            ]),
-        ],
-        serialization=core_schema.plain_serializer_function_ser_schema(
-            lambda x: str(x)
-        ))
-    
-    @classmethod
-    def validate(cls, v):
-        if isinstance(v, ObjectId):
-            return v
-        if isinstance(v, str) and ObjectId.is_valid(v):
-            return ObjectId(v)
-        raise ValueError("Invalid ObjectId")
+        # Add strangle-specific fields
+        if strategy_type == 'strangle':
+            base.update({
+                'call_strike_offset': kwargs.get('call_strike_offset', 2),
+                'put_strike_offset': kwargs.get('put_strike_offset', 2),
+                'strike_selection_method': kwargs.get('strike_selection_method', 'fixed_distance'),
+                'percentage_move': kwargs.get('percentage_move', 5.0),
+                'min_premium_ratio': kwargs.get('min_premium_ratio', 0.3),
+                'max_premium_ratio': kwargs.get('max_premium_ratio', 0.7)
+            })
+        
+        return base
 
-
-class UserModel(BaseModel):
-    """User database model"""
-    id: Optional[PyObjectId] = Field(default=None, alias="_id")
-    telegram_id: int
-    username: Optional[str] = None
-    is_active: bool = True
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    
-    class Config:
-        populate_by_name = True
-        arbitrary_types_allowed = True
-
-
-class APICredentialModel(BaseModel):
-    """API credential database model"""
-    id: Optional[PyObjectId] = Field(default=None, alias="_id")
-    user_id: PyObjectId
-    nickname: str
-    api_key_encrypted: str
-    api_secret_encrypted: str
-    is_active: bool = True
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    
-    class Config:
-        populate_by_name = True
-        arbitrary_types_allowed = True
-
-
-class StrategyModel(BaseModel):
-    """Trading strategy database model"""
-    id: Optional[PyObjectId] = Field(default=None, alias="_id")
-    user_id: PyObjectId
-    api_id: PyObjectId
-    name: str
-    lot_size: int
-    direction: str  # "long" or "short"
-    stop_loss_pct: float
-    target_pct: Optional[float] = None
-    expiry_type: str  # "daily", "weekly", "monthly"
-    strike_offset: int = 0
-    max_capital: float
-    trailing_sl: bool = False
-    underlying: str = "BTC"  # "BTC" or "ETH"
-    
-    # Automatic order fields
-    use_stop_loss_order: bool = False
-    sl_trigger_pct: Optional[float] = None
-    sl_limit_pct: Optional[float] = None
-    
-    use_target_order: bool = False
-    target_trigger_pct: Optional[float] = None
-    
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
-    
-    class Config:
-        populate_by_name = True
-        arbitrary_types_allowed = True
-
-
-class TradeModel(BaseModel):
-    """Trade database model"""
-    id: Optional[PyObjectId] = Field(default=None, alias="_id")
-    user_id: PyObjectId
-    api_id: PyObjectId
-    strategy_id: PyObjectId
-    call_symbol: str
-    put_symbol: str
-    strike: float
-    spot_price: float
-    entry_time: datetime = Field(default_factory=datetime.utcnow)
-    exit_time: Optional[datetime] = None
-    call_entry_price: float
-    put_entry_price: float
-    call_exit_price: Optional[float] = None
-    put_exit_price: Optional[float] = None
-    lot_size: int
-    pnl: float = 0.0
-    status: str = "open"  # "open", "closed", "partial"
-    fees: float = 0.0
-    
-    class Config:
-        populate_by_name = True
-        arbitrary_types_allowed = True
-
-
-class OrderModel(BaseModel):
-    """Order database model"""
-    id: Optional[PyObjectId] = Field(default=None, alias="_id")
-    trade_id: PyObjectId
-    order_id_delta: str
-    symbol: str
-    side: str  # "buy" or "sell"
-    order_type: str  # "market", "limit", "stop"
-    quantity: int
-    price: float
-    status: str = "pending"  # "pending", "filled", "cancelled", "rejected"
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
-    
-    class Config:
-        populate_by_name = True
-        arbitrary_types_allowed = True
-
-
-async def create_strangle_preset(
-    db,
-    user_id: int,
-    api_id: str,
-    preset_name: str,
-    direction: str,
-    strike_method: str,
-    strike_type: Optional[str],
-    strike_value: float,
-    sl_trigger_method: str,
-    sl_trigger_value: float,
-    sl_limit_method: str,
-    sl_limit_value: float,
-    asset: str = "BTC",
-    expiry_type: str = "daily",
-    lot_size: int = 1
-) -> str:
-    """
-    Create a strangle strategy preset
-    
-    Args:
-        direction: "long" or "short"
-        strike_method: "percentage" or "atm_offset"
-        strike_type: "otm" or "itm" (only for percentage method)
-        strike_value: Percentage (1-50) or offset (1-10)
-        sl_trigger_method: "percentage", "numerical", or "multiple"
-        sl_limit_method: "percentage", "numerical", or "multiple"
-    
-    Returns:
-        Preset ID
-    """
-    preset = {
-        "preset_name": preset_name,
-        "user_id": user_id,
-        "api_id": api_id,
-        "strategy_type": "strangle",
-        "direction": direction,
-        "strike_method": strike_method,
-        "strike_type": strike_type,
-        "strike_value": strike_value,
-        "sl_trigger_method": sl_trigger_method,
-        "sl_trigger_value": sl_trigger_value,
-        "sl_limit_method": sl_limit_method,
-        "sl_limit_value": sl_limit_value,
-        "asset": asset,
-        "expiry_type": expiry_type,
-        "lot_size": lot_size,
-        "created_at": datetime.utcnow(),
-        "is_active": True
-    }
-    
-    result = await db.strangle_presets.insert_one(preset)
-    return str(result.inserted_id)
-
-
-async def get_strangle_presets(db, user_id: int):
-    """Get all strangle presets for a user"""
-    presets = await db.strangle_presets.find({
-        "user_id": user_id,
-        "is_active": True
-    }).to_list(None)
-    return presets
-
-
-async def get_strangle_preset_by_id(db, preset_id: str):
-    """Get a specific strangle preset by ID"""
-    return await db.strangle_presets.find_one({"_id": ObjectId(preset_id)})
-
-
-async def delete_strangle_preset(db, preset_id: str):
-    """Delete a strangle preset"""
-    await db.strangle_presets.update_one(
-        {"_id": ObjectId(preset_id)},
-        {"$set": {"is_active": False}}
-    )
+class TradeModel:
+    @staticmethod
+    def create(user_id: str, api_id: str, strategy_id: str, strategy_type: str,
+               call_symbol: str, put_symbol: str, strike: float, **kwargs) -> Dict[str, Any]:
+        return {
+            'user_id': user_id,
+            'api_id': api_id,
+            'strategy_id': strategy_id,
+            'strategy_type': strategy_type,
+            'call_symbol': call_symbol,
+            'put_symbol': put_symbol,
+            'atm_strike': kwargs.get('atm_strike'),
+            'call_strike': kwargs.get('call_strike', strike),
+            'put_strike': kwargs.get('put_strike', strike),
+            'spot_at_entry': kwargs.get('spot_at_entry'),
+            'entry_time': datetime.utcnow(),
+            'exit_time': None,
+            'call_entry_price': kwargs.get('call_entry_price'),
+            'put_entry_price': kwargs.get('put_entry_price'),
+            'call_exit_price': None,
+            'put_exit_price': None,
+            'lot_size': kwargs.get('lot_size'),
+            'pnl': 0.0,
+            'status': 'active',  # active, closed, partial
+            'stop_loss_pct': kwargs.get('stop_loss_pct'),
+            'target_pct': kwargs.get('target_pct'),
+            'upper_breakeven': kwargs.get('upper_breakeven'),
+            'lower_breakeven': kwargs.get('lower_breakeven')
+        }
+                   
