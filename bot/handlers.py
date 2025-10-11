@@ -501,3 +501,421 @@ Use /help for detailed command reference.
 # Additional handler functions would continue here...
 # Due to length constraints, I'll provide the main.py structure
 
+# Add these functions to bot/handlers.py
+
+async def handle_strategy_type_callback(query, context, data):
+    """Handle strategy type selection"""
+    user_id = query.from_user.id
+    strategy_type = data.replace('type_', '')
+    
+    if strategy_type == 'compare':
+        # Show comparison between straddle and strangle
+        user = query.from_user
+        db_user = user_crud.get_user_by_telegram_id(user.id)
+        active_api = api_crud.get_active_credential(str(db_user['_id']))
+        
+        if not active_api:
+            await query.edit_message_text(
+                "⚠️ Please add and activate an API credential first.",
+                parse_mode='Markdown'
+            )
+            return
+        
+        # Get API and create comparison
+        api_key = encryptor.decrypt(active_api['api_key_encrypted'])
+        api_secret = encryptor.decrypt(active_api['api_secret_encrypted'])
+        delta_api = DeltaExchangeAPI(api_key, api_secret)
+        
+        spot_price = delta_api.get_spot_price('BTCUSD')
+        if not spot_price:
+            await query.edit_message_text("❌ Failed to fetch spot price")
+            return
+        
+        strangle = StrangleStrategy(delta_api)
+        comparison = strangle.compare_with_straddle(spot_price, 2, 2, 'BTC')
+        
+        if comparison:
+            comp_text = f"""
+📊 **Straddle vs Strangle Comparison**
+
+Spot Price: {format_currency(spot_price)}
+
+**ATM Straddle:**
+Strike: {comparison['straddle']['strike']}
+Total Premium: {format_currency(comparison['straddle']['total_premium'])}
+
+**OTM Strangle (±2):**
+Call Strike: {comparison['strangle']['call_strike']}
+Put Strike: {comparison['strangle']['put_strike']}
+Total Premium: {format_currency(comparison['strangle']['total_premium'])}
+
+💰 **Cost Savings: {comparison['cost_savings_pct']:.2f}%**
+Difference: {format_currency(comparison['cost_difference'])}
+            """
+            await query.edit_message_text(
+                comp_text,
+                reply_markup=get_strategy_type_keyboard(),
+                parse_mode='Markdown'
+            )
+        else:
+            await query.edit_message_text("❌ Failed to fetch comparison data")
+        return
+    
+    # Store strategy type in user state
+    if user_id not in user_states:
+        user_states[user_id] = {}
+    
+    user_states[user_id]['action'] = 'create_strategy'
+    user_states[user_id]['strategy_type'] = strategy_type
+    user_states[user_id]['step'] = 'direction'
+    
+    await query.edit_message_text(
+        f"📋 Creating **{strategy_type.upper()}** Strategy\n\n"
+        "Select direction:",
+        reply_markup=get_direction_keyboard(),
+        parse_mode='Markdown'
+    )
+
+async def handle_direction_callback(query, context, data):
+    """Handle direction selection"""
+    user_id = query.from_user.id
+    direction = data.replace('dir_', '')
+    
+    if user_id not in user_states:
+        await query.edit_message_text("❌ Session expired. Please start over.")
+        return
+    
+    user_states[user_id]['direction'] = direction
+    user_states[user_id]['step'] = 'expiry'
+    
+    await query.edit_message_text(
+        f"Direction: **{direction.upper()}**\n\n"
+        "Select expiry type:",
+        reply_markup=get_expiry_keyboard(),
+        parse_mode='Markdown'
+    )
+
+async def handle_expiry_callback(query, context, data):
+    """Handle expiry selection"""
+    user_id = query.from_user.id
+    expiry = data.replace('exp_', '')
+    
+    if user_id not in user_states:
+        await query.edit_message_text("❌ Session expired. Please start over.")
+        return
+    
+    user_states[user_id]['expiry_type'] = expiry
+    user_states[user_id]['step'] = 'strike_offset'
+    
+    strategy_type = user_states[user_id].get('strategy_type', 'straddle')
+    
+    await query.edit_message_text(
+        f"Expiry: **{expiry.upper()}**\n\n"
+        "Select strike offset:",
+        reply_markup=get_strike_offset_keyboard(strategy_type),
+        parse_mode='Markdown'
+    )
+
+async def handle_offset_callback(query, context, data):
+    """Handle strike offset selection"""
+    user_id = query.from_user.id
+    offset_type = data.replace('offset_', '')
+    
+    if user_id not in user_states:
+        await query.edit_message_text("❌ Session expired. Please start over.")
+        return
+    
+    strategy_type = user_states[user_id].get('strategy_type', 'straddle')
+    
+    if offset_type == 'custom':
+        user_states[user_id]['step'] = 'custom_offset'
+        await query.edit_message_text(
+            "Enter custom strike offset (e.g., 3 for ±3 strikes from ATM):"
+        )
+        return
+    
+    # Set predefined offsets
+    if offset_type == 'atm':
+        call_offset = 0
+        put_offset = 0
+    elif offset_type == 'near':
+        call_offset = 2
+        put_offset = 2
+    elif offset_type == 'mid':
+        call_offset = 4
+        put_offset = 4
+    elif offset_type == 'far':
+        call_offset = 6
+        put_offset = 6
+    
+    user_states[user_id]['call_strike_offset'] = call_offset
+    user_states[user_id]['put_strike_offset'] = put_offset
+    user_states[user_id]['step'] = 'lot_size'
+    
+    await query.edit_message_text(
+        f"Strike Offset: **±{call_offset}**\n\n"
+        "Enter lot size (number of contracts):"
+    )
+
+async def handle_execute_callback(query, context, data):
+    """Handle strategy execution"""
+    strategy_id = data.replace('execute_', '')
+    user = query.from_user
+    db_user = user_crud.get_user_by_telegram_id(user.id)
+    
+    # Get strategy details
+    strategy = strategy_crud.get_strategy_by_id(strategy_id)
+    if not strategy:
+        await query.edit_message_text("❌ Strategy not found")
+        return
+    
+    # Get active API
+    active_api = api_crud.get_active_credential(str(db_user['_id']))
+    if not active_api:
+        await query.edit_message_text("⚠️ No active API found")
+        return
+    
+    # Decrypt credentials
+    api_key = encryptor.decrypt(active_api['api_key_encrypted'])
+    api_secret = encryptor.decrypt(active_api['api_secret_encrypted'])
+    delta_api = DeltaExchangeAPI(api_key, api_secret)
+    
+    # Get spot price
+    spot_price = delta_api.get_spot_price('BTCUSD')
+    if not spot_price:
+        await query.edit_message_text("❌ Failed to fetch spot price")
+        return
+    
+    strategy_type = strategy['strategy_type']
+    direction = strategy['direction']
+    lot_size = strategy['lot_size']
+    
+    # Execute based on strategy type
+    if strategy_type == 'straddle':
+        straddle = StraddleStrategy(delta_api)
+        options = straddle.find_atm_options(spot_price, 'BTC', strategy['expiry_type'])
+        
+        if not options:
+            await query.edit_message_text("❌ Failed to find ATM options")
+            return
+        
+        call_option, put_option = options
+        details = straddle.calculate_straddle_details(call_option, put_option, lot_size, direction)
+        
+    else:  # strangle
+        strangle = StrangleStrategy(delta_api)
+        atm_strike = strangle.find_atm_strike(spot_price)
+        call_strike, put_strike = strangle.calculate_otm_strikes(
+            atm_strike, 
+            strategy['call_strike_offset'],
+            strategy['put_strike_offset']
+        )
+        
+        options = strangle.find_otm_options(call_strike, put_strike, 'BTC', strategy['expiry_type'])
+        
+        if not options:
+            await query.edit_message_text("❌ Failed to find OTM options")
+            return
+        
+        call_option, put_option = options
+        details = strangle.calculate_strangle_details(
+            call_option, put_option, atm_strike, lot_size, direction
+        )
+    
+    if not details:
+        await query.edit_message_text("❌ Failed to calculate trade details")
+        return
+    
+    # Show confirmation
+    confirm_text = f"""
+🎯 **Trade Confirmation**
+
+Strategy: {strategy['name']}
+Type: {strategy_type.upper()}
+Direction: {direction.upper()}
+
+Spot Price: {format_currency(spot_price)}
+
+**Call Leg:**
+Symbol: {details['call_symbol']}
+Strike: {details.get('call_strike', details['strike'])}
+Premium: {format_currency(details['call_premium'])}
+
+**Put Leg:**
+Symbol: {details['put_symbol']}
+Strike: {details.get('put_strike', details['strike'])}
+Premium: {format_currency(details['put_premium'])}
+
+**Total:**
+Premium: {format_currency(details['total_premium'])}
+Cost: {format_currency(details['total_cost'])}
+Lot Size: {lot_size}
+
+Breakeven Range: {format_currency(details['lower_breakeven'])} - {format_currency(details['upper_breakeven'])}
+
+Proceed with execution?
+    """
+    
+    # Store details in context for confirmation
+    context.user_data['pending_trade'] = details
+    context.user_data['strategy_id'] = strategy_id
+    context.user_data['strategy_type'] = strategy_type
+    
+    await query.edit_message_text(
+        confirm_text,
+        reply_markup=get_confirmation_keyboard('trade'),
+        parse_mode='Markdown'
+    )
+
+async def handle_confirm_callback(query, context, data):
+    """Handle trade confirmation"""
+    action = data.replace('confirm_', '')
+    
+    if action == 'trade':
+        user = query.from_user
+        db_user = user_crud.get_user_by_telegram_id(user.id)
+        
+        # Get pending trade details
+        details = context.user_data.get('pending_trade')
+        strategy_id = context.user_data.get('strategy_id')
+        strategy_type = context.user_data.get('strategy_type')
+        
+        if not details:
+            await query.edit_message_text("❌ Trade details not found")
+            return
+        
+        # Get API
+        active_api = api_crud.get_active_credential(str(db_user['_id']))
+        api_key = encryptor.decrypt(active_api['api_key_encrypted'])
+        api_secret = encryptor.decrypt(active_api['api_secret_encrypted'])
+        delta_api = DeltaExchangeAPI(api_key, api_secret)
+        
+        # Validate margin
+        if strategy_type == 'straddle':
+            straddle = StraddleStrategy(delta_api)
+            if not straddle.validate_margin(details['total_cost']):
+                await query.edit_message_text("❌ Insufficient margin for this trade")
+                return
+            
+            # Execute trade
+            await query.edit_message_text("⏳ Executing trade...")
+            call_order, put_order = straddle.execute_straddle(
+                details['call_product_id'],
+                details['put_product_id'],
+                details['lot_size'],
+                details['direction']
+            )
+        else:
+            strangle = StrangleStrategy(delta_api)
+            if not strangle.validate_margin(details['total_cost']):
+                await query.edit_message_text("❌ Insufficient margin for this trade")
+                return
+            
+            # Execute trade
+            await query.edit_message_text("⏳ Executing trade...")
+            call_order, put_order = strangle.execute_strangle(
+                details['call_product_id'],
+                details['put_product_id'],
+                details['lot_size'],
+                details['direction']
+            )
+        
+        if not call_order or not put_order:
+            await query.edit_message_text("❌ Trade execution failed")
+            return
+        
+        # Save trade to database
+        from trading.order_manager import OrderManager
+        order_mgr = OrderManager(delta_api)
+        
+        call_fill_price = order_mgr.get_fill_price(call_order)
+        put_fill_price = order_mgr.get_fill_price(put_order)
+        
+        trade_id = trade_crud.create_trade(
+            user_id=str(db_user['_id']),
+            api_id=str(active_api['_id']),
+            strategy_id=strategy_id,
+            strategy_type=strategy_type,
+            call_symbol=details['call_symbol'],
+            put_symbol=details['put_symbol'],
+            strike=details.get('strike', details.get('atm_strike')),
+            atm_strike=details.get('atm_strike'),
+            call_strike=details.get('call_strike'),
+            put_strike=details.get('put_strike'),
+            spot_at_entry=details.get('spot_at_entry'),
+            call_entry_price=call_fill_price,
+            put_entry_price=put_fill_price,
+            lot_size=details['lot_size'],
+            stop_loss_pct=20.0,  # From strategy
+            upper_breakeven=details['upper_breakeven'],
+            lower_breakeven=details['lower_breakeven']
+        )
+        
+        success_text = f"""
+✅ **Trade Executed Successfully!**
+
+Trade ID: {trade_id}
+
+Call Order: {call_order.get('id')}
+Fill Price: {format_currency(call_fill_price)}
+
+Put Order: {put_order.get('id')}
+Fill Price: {format_currency(put_fill_price)}
+
+Monitor your position with /positions
+        """
+        
+        await query.edit_message_text(success_text, parse_mode='Markdown')
+        
+        # Clear pending trade
+        context.user_data.pop('pending_trade', None)
+        context.user_data.pop('strategy_id', None)
+
+async def handle_close_position_callback(query, context, data):
+    """Handle position closure"""
+    if data == 'close_all_positions':
+        # Close all positions confirmation
+        await query.edit_message_text(
+            "⚠️ Are you sure you want to close ALL positions?",
+            reply_markup=get_yes_no_keyboard('close_all'),
+            parse_mode='Markdown'
+        )
+    else:
+        position_index = int(data.replace('close_position_', ''))
+        positions = context.user_data.get('positions', [])
+        
+        if position_index >= len(positions):
+            await query.edit_message_text("❌ Position not found")
+            return
+        
+        position = positions[position_index]
+        
+        confirm_text = f"""
+⚠️ **Close Position**
+
+Symbol: {position['symbol']}
+Current P&L: {format_currency(position['unrealized_pnl'])}
+
+Proceed with closing?
+        """
+        
+        context.user_data['closing_position'] = position
+        
+        await query.edit_message_text(
+            confirm_text,
+            reply_markup=get_yes_no_keyboard(f'close_pos_{position_index}'),
+            parse_mode='Markdown'
+        )
+
+async def handle_back_callback(query, context, data):
+    """Handle back navigation"""
+    target = data.replace('back_', '')
+    
+    if target == 'main':
+        await query.edit_message_text(
+            "🏠 **Main Menu**",
+            reply_markup=get_main_menu_keyboard(),
+            parse_mode='Markdown'
+        )
+    # Add more back navigation handlers as needed
+    
