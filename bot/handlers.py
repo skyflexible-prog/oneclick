@@ -568,10 +568,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     data = query.data
     
-    # ✅ SKIP strangle callbacks - let ConversationHandler handle them
-    if data.startswith("strangle_"):
-        return  # Let strangle_conv_handler handle it
-    
     # Main menu
     if data == "main_menu":
         await query.edit_message_text(
@@ -584,6 +580,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # ✅ ADD THIS - Strangle Menu Handler
     elif data == "strangle_menu":
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+        
         strangle_text = (
             "🎲 <b>Strangle Strategy</b>\n\n"
             "A strangle involves buying/selling OTM call and put options.\n\n"
@@ -608,7 +606,12 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
         return
-    
+
+    # ✅ SKIP strangle action callbacks - let ConversationHandler handle them
+    elif data in ["strangle_create", "strangle_execute", "strangle_manage"]:
+        # Don't return - let the handler chain continue
+        pass
+        
     # Help
     elif data == "help":
         help_text = (
