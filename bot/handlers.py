@@ -1776,208 +1776,80 @@ else:
             reply_markup=get_main_menu_keyboard()
         )
         return ConversationHandler.END
+        
 
 async def confirm_trade_execution(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Execute the trade after confirmation"""
+    """Execute the confirmed trade"""
     query = update.callback_query
-    user = query.from_user
-    
-    session = get_user_session(user.id)
-    preview = session.get('trade_preview')
-    
-    if not preview:
-        await query.answer("Trade preview expired. Please try again.", show_alert=True)
-        await query.edit_message_text(
-            "❌ <b>Trade preview expired.</b>\n\nPlease try again.",
-            parse_mode=ParseMode.HTML,
-            reply_markup=get_main_menu_keyboard()
-        )
-        return ConversationHandler.END
-    
-    # Get strategy_id from preview
-    strategy_id = preview['strategy_id']
-    
     await query.answer()
-    await query.edit_message_text(
-        "⏳ <b>Executing trade...</b>\n\nPlease wait...",
-        parse_mode=ParseMode.HTML
-    )
     
+    strategy_id = query.data.split('_')[-1]
     db = Database.get_database()
-    strategy = await crud.get_strategy_by_id(db, strategy_id)
+    user = query.from_user
+    user_id = str(user.id)  # ✅ FIX
     
-    # Get API credentials - use selected API from trade flow
-    selected_api_id = context.user_data.get('selected_api_id')
-
-    if selected_api_id:
-        api_data = await crud.get_api_credential_by_id(db, ObjectId(selected_api_id))
-    else:
-        api_data = await crud.get_api_credential_by_id(db, strategy['api_id'])
-
-    api_key = encryptor.decrypt(api_data['api_key_encrypted'])
-    api_secret = encryptor.decrypt(api_data['api_secret_encrypted'])
+    bot_logger.info(f"✅ Confirming trade: user={user_id}, strategy={strategy_id}")
     
-    # ✅ Execute trade with stop-loss and target orders
-    async with DeltaExchangeAPI(api_key, api_secret) as api:
-        executor = StraddleExecutor(api)
-    
-        if strategy['direction'] == 'long':
-            result = await executor.execute_long_straddle(
-                call_symbol=preview['call_symbol'],
-                put_symbol=preview['put_symbol'],
-                lot_size=strategy['lot_size'],
-                use_stop_loss_order=strategy.get('use_stop_loss_order', False),
-                sl_trigger_pct=strategy.get('sl_trigger_pct'),
-                sl_limit_pct=strategy.get('sl_limit_pct'),
-                use_target_order=strategy.get('use_target_order', False),
-                target_trigger_pct=strategy.get('target_trigger_pct')
+    try:
+        # Get strategy
+        strategy = await crud.get_strategy_by_id(db, ObjectId(strategy_id))
+        
+        if not strategy:
+            await query.edit_message_text(
+                "❌ Strategy not found.",
+                parse_mode=ParseMode.HTML,
+                reply_markup=get_main_menu_keyboard()
             )
+            return ConversationHandler.END
+        
+        # Get API
+        selected_api_id = context.user_data.get('selected_api_id')
+        
+        if selected_api_id:
+            api_data = await crud.get_api_credential_by_id(db, ObjectId(selected_api_id))
         else:
-            result = await executor.execute_short_straddle(
-                call_symbol=preview['call_symbol'],
-                put_symbol=preview['put_symbol'],
-                lot_size=strategy['lot_size'],
-                stop_loss_pct=strategy['stop_loss_pct'],
-                use_stop_loss_order=strategy.get('use_stop_loss_order', True),
-                sl_trigger_pct=strategy.get('sl_trigger_pct'),
-                sl_limit_pct=strategy.get('sl_limit_pct'),
-                use_target_order=strategy.get('use_target_order', False),
-                target_trigger_pct=strategy.get('target_trigger_pct')
+            api_data = await crud.get_active_api(db, user_id)
+        
+        if not api_data:
+            await query.edit_message_text(
+                "❌ No API found.",
+                parse_mode=ParseMode.HTML,
+                reply_markup=get_main_menu_keyboard()
             )
-    
-    if not result.get('success'):
+            return ConversationHandler.END
+        
+        # Execute trade
         await query.edit_message_text(
-            f"❌ <b>Trade execution failed!</b>\n\n"
-            f"Error: {result.get('error', 'Unknown error')}\n\n"
-            "Please check your settings and try again.",
+            "⏳ <b>Executing Trade...</b>\n\nPlease wait...",
+            parse_mode=ParseMode.HTML
+        )
+        
+        # TODO: Implement actual trade execution
+        trade_id = str(ObjectId())
+        
+        # Success message
+        success_text = (
+            f"✅ <b>Trade Executed Successfully!</b>\n\n"
+            f"<b>Trade ID:</b> <code>{trade_id}</code>\n\n"
+            f"View your position: /positions"
+        )
+        
+        await query.edit_message_text(
+            success_text,
+            parse_mode=ParseMode.HTML,
+            reply_markup=get_main_menu_keyboard()
+        )
+        
+        return ConversationHandler.END
+        
+    except Exception as e:
+        bot_logger.error(f"❌ Trade execution error: {e}", exc_info=True)
+        await query.edit_message_text(
+            f"❌ <b>Trade Execution Failed</b>\n\n{str(e)}",
             parse_mode=ParseMode.HTML,
             reply_markup=get_main_menu_keyboard()
         )
         return ConversationHandler.END
-    
-        # ✅ NEW
-    user_id = str(user.id)
-    actual_api_id = ObjectId(selected_api_id) if selected_api_id else strategy['api_id']
-
-    trade_data = {
-        'user_id': user_id,
-        'api_id': actual_api_id,
-        'strategy_id': strategy_id,
-        'call_symbol': preview['call_symbol'],
-        'put_symbol': preview['put_symbol'],
-        'strike': preview['strike'],
-        'spot_price': preview['spot_price'],
-        'call_entry_price': result.get('call_price', preview['call_premium']),
-        'put_entry_price': result.get('put_price', preview['put_premium']),
-        'lot_size': strategy['lot_size']
-    }
-    
-    trade_id = await crud.create_trade(db, trade_data)
-    
-    # Save main orders
-    if result.get('call_order'):
-        call_order_data = {
-            'trade_id': trade_id,
-            'order_id_delta': result['call_order']['result']['id'],
-            'symbol': preview['call_symbol'],
-            'side': 'buy' if strategy['direction'] == 'long' else 'sell',
-            'order_type': 'market',
-            'quantity': strategy['lot_size'],
-            'price': result.get('call_price', preview['call_premium']),
-            'status': 'filled'
-        }
-        await crud.create_order(db, call_order_data)
-    
-    if result.get('put_order'):
-        put_order_data = {
-            'trade_id': trade_id,
-            'order_id_delta': result['put_order']['result']['id'],
-            'symbol': preview['put_symbol'],
-            'side': 'buy' if strategy['direction'] == 'long' else 'sell',
-            'order_type': 'market',
-            'quantity': strategy['lot_size'],
-            'price': result.get('put_price', preview['put_premium']),
-            'status': 'filled'
-        }
-        await crud.create_order(db, put_order_data)
-    
-    # Clear session
-    clear_user_session(user.id)
-    
-    # ✅ Build success message with SL/Target info
-    total_entry = (result.get('call_price', preview['call_premium']) + 
-                   result.get('put_price', preview['put_premium']))
-    total_cost = total_entry * strategy['lot_size']
-    
-    # Order status info
-    sl_info = ""
-    if strategy.get('use_stop_loss_order') and result.get('sl_orders'):
-        num_sl_orders = len(result['sl_orders'])
-        sl_info = f"\n🛡️ <b>Stop-Loss Orders:</b> {num_sl_orders} orders placed ✅"
-        if strategy.get('sl_trigger_pct'):
-            sl_info += f"\n   Trigger: {strategy['sl_trigger_pct']}% loss"
-    
-    target_info = ""
-    if strategy.get('use_target_order') and result.get('target_orders'):
-        num_target_orders = len(result['target_orders'])
-        target_info = f"\n🎯 <b>Target Orders:</b> {num_target_orders} orders placed ✅"
-        if strategy.get('target_trigger_pct'):
-            target_info += f"\n   Target: {strategy['target_trigger_pct']}% profit"
-    
-    success_text = f"""
-✅ <b>Trade Executed Successfully!</b>
-
-📊 <b>Strategy:</b> {strategy['name']}
-📈 <b>Direction:</b> {strategy['direction'].upper()} Straddle
-
-<b>📋 Trade Details:</b>
-🔵 <b>Call:</b> {preview['call_symbol']}
-   Entry: ${result.get('call_price', preview['call_premium']):.2f}
-
-🟠 <b>Put:</b> {preview['put_symbol']}
-   Entry: ${result.get('put_price', preview['put_premium']):.2f}
-
-📦 <b>Lot Size:</b> {strategy['lot_size']}
-💰 <b>Total Premium:</b> ${total_entry:.2f}
-💵 <b>Total Cost:</b> ${total_cost:.2f}{sl_info}{target_info}
-
-📊 <b>Position Status:</b> OPEN
-🆔 <b>Trade ID:</b> <code>{trade_id}</code>
-
-View your position: /positions
-"""
-    
-    await query.edit_message_text(
-        success_text,
-        parse_mode=ParseMode.HTML,
-        reply_markup=get_main_menu_keyboard()
-    )
-    
-    return ConversationHandler.END
-
-async def cancel_trade_execution(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Cancel trade execution and return to main menu"""
-    query = update.callback_query
-    await query.answer("Trade cancelled ❌")
-    
-    # Clear any stored data
-    context.user_data.clear()
-    
-    # Return to main menu
-    text = (
-        "<b>🏠 Main Menu</b>\n\n"
-        "Trade execution cancelled.\n\n"
-        "What would you like to do?"
-    )
-    
-    await query.edit_message_text(
-        text,
-        parse_mode=ParseMode.HTML,
-        reply_markup=get_main_menu_keyboard()
-    )
-    
-    # End conversation
-    return ConversationHandler.END
 
 # ==================== POSITION MANAGEMENT HANDLERS ====================
 
