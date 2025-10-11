@@ -2520,16 +2520,9 @@ async def show_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     db = Database.get_database()
     user = query.from_user
-    user_data = await crud.get_user_by_telegram_id(db, user.id)
-    
-    if not user_data:
-        await query.edit_message_text(
-            "❌ User not found.",
-            parse_mode=ParseMode.HTML,
-            reply_markup=get_main_menu_keyboard()
-        )
-        return
-    
+    # ✅ NEW
+    user_id = str(user.id)
+
     try:
         from datetime import datetime
         from collections import defaultdict
