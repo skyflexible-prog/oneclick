@@ -537,18 +537,13 @@ async def receive_api_secret(update: Update, context: ContextTypes.DEFAULT_TYPE)
     return ConversationHandler.END
 
 
-# bot/handlers.py - COMPLETE FIXED VERSION
-
 async def list_apis(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """List all user APIs"""
     query = update.callback_query
     await query.answer()
     
-    user = query.from_user
     db = Database.get_database()
-    
-    # ✅ FIX: Use Telegram user ID as string
-    user_id = str(user.id)
+    user_id = str(query.from_user.id)  # ← FIX: Use Telegram ID as string
     
     bot_logger.info(f"📋 Listing APIs for user {user_id}")
     
@@ -558,12 +553,21 @@ async def list_apis(update: Update, context: ContextTypes.DEFAULT_TYPE):
     bot_logger.info(f"   Found {len(apis)} API(s)")
     
     if not apis:
-        await query.edit_message_text(
-            "📋 <b>API Credentials</b>\n\n"
-            "You haven't added any API credentials yet.",
-            parse_mode=ParseMode.HTML,
-            reply_markup=get_api_management_keyboard()
-        )
+        try:
+            await query.edit_message_text(
+                "📋 <b>API Credentials</b>\n\n"
+                "You haven't added any API credentials yet.",
+                parse_mode=ParseMode.HTML,
+                reply_markup=get_api_management_keyboard()
+            )
+        except Exception as e:
+            # If edit fails, send new message
+            await query.message.reply_text(
+                "📋 <b>API Credentials</b>\n\n"
+                "You haven't added any API credentials yet.",
+                parse_mode=ParseMode.HTML,
+                reply_markup=get_api_management_keyboard()
+            )
         return
     
     # Build message with all APIs
@@ -571,17 +575,59 @@ async def list_apis(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     for i, api in enumerate(apis, 1):
         status = "✅ Active" if api.get('is_active') else "⚪ Inactive"
-        message += f"<b>{i}. {api.get('nickname')}</b>\n"
+        nickname = api.get('nickname', 'Unnamed')
+        api_id = str(api.get('_id'))
+        
+        message += f"<b>{i}. {nickname}</b>\n"
         message += f"   Status: {status}\n"
-        message += f"   ID: <code>{str(api.get('_id'))}</code>\n\n"
+        message += f"   ID: <code>{api_id[:8]}...</code>\n\n"
     
-    message += f"<b>Total:</b> {len(apis)} API(s)"
+    message += f"<b>Total:</b> {len(apis)} API(s)\n\n"
+    message += "Select an option below:"
     
-    await query.edit_message_text(
-        message,
-        parse_mode=ParseMode.HTML,
-        reply_markup=get_api_list_keyboard(apis)
-    )
+    # Build keyboard with action buttons
+    keyboard = []
+    
+    # Add activate/delete buttons for each API
+    for api in apis:
+        nickname = api.get('nickname', 'Unnamed')
+        api_id = str(api.get('_id'))
+        
+        # Activate button (if not active)
+        if not api.get('is_active'):
+            keyboard.append([
+                InlineKeyboardButton(
+                    f"✅ Activate {nickname}", 
+                    callback_data=f"activate_api_{api_id}"
+                )
+            ])
+        
+        # Delete button
+        keyboard.append([
+            InlineKeyboardButton(
+                f"🗑️ Delete {nickname}", 
+                callback_data=f"delete_api_{api_id}"
+            )
+        ])
+    
+    # Back button
+    keyboard.append([
+        InlineKeyboardButton("🔙 Back to API Menu", callback_data="api_menu")
+    ])
+    
+    try:
+        await query.edit_message_text(
+            message,
+            parse_mode=ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+    except Exception as e:
+        bot_logger.warning(f"Edit message failed: {e}")
+        await query.message.reply_text(
+            message,
+            parse_mode=ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
 
 
 async def view_api_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
