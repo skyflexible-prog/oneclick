@@ -171,16 +171,26 @@ async def get_api_credential_by_id(db: AsyncIOMotorDatabase, api_id: str) -> Opt
     return credential
 
 
-async def set_active_api(db: AsyncIOMotorDatabase, user_id: str, api_id: str):
-    """Set specific API as active and deactivate others"""
+async def set_active_api(db, user_id: str, api_id):
+    """Set API as active"""
+    from bson import ObjectId
+    
+    if isinstance(api_id, str):
+        api_id = ObjectId(api_id)
+    
+    # Deactivate all user's APIs
     await db.api_credentials.update_many(
-        {"user_id": user_id},  # ✅ FIXED
+        {"user_id": user_id},
         {"$set": {"is_active": False}}
     )
-    await db.api_credentials.update_one(
-        {"_id": ObjectId(api_id)},
+    
+    # Activate selected one
+    result = await db.api_credentials.update_one(
+        {"_id": api_id, "user_id": user_id},
         {"$set": {"is_active": True}}
     )
+    
+    return result.modified_count > 0
 
 async def delete_api_credential(db, user_id: str, api_id):
     """Delete API credential with user verification"""
