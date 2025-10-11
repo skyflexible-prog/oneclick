@@ -1448,23 +1448,19 @@ async def trade_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # bot/handlers.py - COMPLETE FIXED VERSION
 
 async def select_api_for_trade(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """After API selection, show strategies"""
+    """Select API for trade execution"""
     query = update.callback_query
     await query.answer()
     
-    # Extract API ID from callback data: trade_api_{api_id}
     api_id = query.data.split('_')[-1]
     context.user_data['selected_api_id'] = api_id
     
-    user = query.from_user
     db = Database.get_database()
-    
-    # ✅ FIX: Use Telegram user ID as string
-    user_id = str(user.id)
+    user_id = str(query.from_user.id)
     
     bot_logger.info(f"📊 Selecting API for trade: user={user_id}, api_id={api_id}")
     
-    # ✅ FIX: Get user's strategies with user_id string
+    # Get strategies
     strategies = await crud.get_user_strategies(db, user_id)
     
     bot_logger.info(f"   Found {len(strategies)} strategy(ies)")
@@ -1472,17 +1468,15 @@ async def select_api_for_trade(update: Update, context: ContextTypes.DEFAULT_TYP
     if not strategies:
         await query.edit_message_text(
             "⚠️ <b>No Strategies</b>\n\n"
-            "Please create a trading strategy first.\n\n"
-            "Go to <b>Strategies</b> → <b>Create New Strategy</b>",
+            "Please create a trading strategy first.",
             parse_mode=ParseMode.HTML,
             reply_markup=get_main_menu_keyboard()
         )
         return ConversationHandler.END
     
-    # Get API details for display
+    # Get API details
     api_data = await crud.get_api_credential_by_id(db, ObjectId(api_id))
     
-    # Show strategy selection
     await query.edit_message_text(
         f"📊 <b>Execute Trade</b>\n\n"
         f"🔑 <b>Selected API:</b> {api_data.get('nickname', 'Unnamed')}\n\n"
