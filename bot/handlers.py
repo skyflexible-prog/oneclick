@@ -1376,6 +1376,8 @@ async def trade_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     return SELECTING_API
 
+# bot/handlers.py - COMPLETE FIXED VERSION
+
 async def select_api_for_trade(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """After API selection, show strategies"""
     query = update.callback_query
@@ -1385,12 +1387,18 @@ async def select_api_for_trade(update: Update, context: ContextTypes.DEFAULT_TYP
     api_id = query.data.split('_')[-1]
     context.user_data['selected_api_id'] = api_id
     
-    user = update.effective_user
+    user = query.from_user
     db = Database.get_database()
     
-    # Get user's strategies
-    user_data = await crud.get_user_by_telegram_id(db, user.id)
-    strategies = await crud.get_user_strategies(db, user_data['_id'])
+    # ✅ FIX: Use Telegram user ID as string
+    user_id = str(user.id)
+    
+    bot_logger.info(f"📊 Selecting API for trade: user={user_id}, api_id={api_id}")
+    
+    # ✅ FIX: Get user's strategies with user_id string
+    strategies = await crud.get_user_strategies(db, user_id)
+    
+    bot_logger.info(f"   Found {len(strategies)} strategy(ies)")
     
     if not strategies:
         await query.edit_message_text(
@@ -1415,6 +1423,7 @@ async def select_api_for_trade(update: Update, context: ContextTypes.DEFAULT_TYP
     )
     
     return SELECTING_STRATEGY
+
 
 async def execute_trade_preview(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show trade preview and confirmation"""
