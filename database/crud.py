@@ -1,454 +1,145 @@
-# database/crud.py
-
-from motor.motor_asyncio import AsyncIOMotorDatabase
+from typing import Optional, List, Dict, Any
 from bson import ObjectId
-from typing import List, Optional, Dict
-from datetime import datetime
-from database.models import (
-    UserModel, APICredentialModel, StrategyModel, 
-    TradeModel, OrderModel
-)
-from config.database import Database
-from utils.logger import bot_logger
+from config.database import db_instance
+import logging
 
+logger = logging.getLogger(__name__)
 
-# ==================== INDEX CREATION ====================
+class UserCRUD:
+    def __init__(self):
+        self.collection = db_instance.get_db().users
 
-async def create_indexes():
-    """Create database indexes for performance optimization"""
-    try:
-        db = Database.get_database()
-        
-        # Users indexes
-        await db.users.create_index([("telegram_id", 1)], unique=True)
-        await db.users.create_index([("created_at", -1)])
-        
-        # API credentials indexes
-        await db.api_credentials.create_index([("user_id", 1)])
-        await db.api_credentials.create_index([("is_active", 1)])
-        await db.api_credentials.create_index([
-            ("user_id", 1),
-            ("is_active", 1)
-        ])
-        
-        # Strategies indexes
-        await db.strategies.create_index([("user_id", 1)])
-        await db.strategies.create_index([("strategy_name", 1)])
-        await db.strategies.create_index([
-            ("user_id", 1),
-            ("created_at", -1)
-        ])
-        
-        # Trades indexes
-        await db.trades.create_index([("user_id", 1)])
-        await db.trades.create_index([("status", 1)])
-        await db.trades.create_index([("created_at", -1)])
-        await db.trades.create_index([
-            ("user_id", 1),
-            ("status", 1)
-        ])
-        
-        # Orders indexes
-        await db.orders.create_index([("trade_id", 1)])
-        await db.orders.create_index([("timestamp", -1)])
-        
-        bot_logger.info("✅ Database indexes created successfully")
-    except Exception as e:
-        bot_logger.error(f"Error creating database indexes: {e}")
-
-# database/crud.py - FIXED VERSION
-
-async def create_order_state_indexes():
-    """Create indexes for order state tracking (OPTIMIZED)"""
-    try:
-        db = Database.get_database()
-        
-        # ✅ FIX: Drop old index first
+    def create_user(self, telegram_id: int, username: str, first_name: str) -> Optional[str]:
         try:
-            await db.order_states.drop_index("filled_at_1")
-            bot_logger.info("Dropped old filled_at_1 index")
-        except Exception:
-            pass  # Index might not exist yet
-        
-        # Compound index for order lookup
-        await db.order_states.create_index([
-            ("user_id", 1),
-            ("api_id", 1),
-            ("order_id", 1)
-        ], unique=True)
-        
-        # Index for state queries
-        await db.order_states.create_index([
-            ("state", 1),
-            ("updated_at", -1)
-        ])
-        
-        # ✅ TTL INDEX: Auto-delete filled orders after 7 DAYS
-        await db.order_states.create_index(
-            [("filled_at", 1)],
-            expireAfterSeconds=604800  # 7 days
-        )
-        
-        # ✅ TTL INDEX: Delete old pending orders after 30 days
-        await db.order_states.create_index(
-            [("updated_at", 1)],
-            expireAfterSeconds=2592000  # 30 days
-        )
-        
-        bot_logger.info("✅ Order state indexes created (optimized)")
-    except Exception as e:
-        bot_logger.error(f"Error creating order state indexes: {e}")
+            from database.models import UserModel
+            user_data = UserModel.create(telegram_id, username, first_name)
+            result = self.collection.insert_one(user_data)
+            return str(result.inserted_id)
+        except Exception as e:
+            logger.error(f"Error creating user: {e}")
+            return None
 
+    def get_user_by_telegram_id(self, telegram_id: int) -> Optional[Dict]:
+        return self.collection.find_one({'telegram_id': telegram_id})
 
-# ==================== USER OPERATIONS ====================
+    def get_or_create_user(self, telegram_id: int, username: str, first_name: str) -> Dict:
+        user = self.get_user_by_telegram_id(telegram_id)
+        if not user:
+            user_id = self.create_user(telegram_id, username, first_name)
+            user = self.collection.find_one({'_id': ObjectId(user_id)})
+        return user
 
-async def create_user(db: AsyncIOMotorDatabase, telegram_id: int, username: str = None) -> str:
-    """Create new user"""
-    user_data = {
-        "telegram_id": telegram_id,
-        "username": username,
-        "is_active": True,
-        "created_at": datetime.utcnow()
-    }
-    result = await db.users.insert_one(user_data)
-    return str(result.inserted_id)
+class APICredentialCRUD:
+    def __init__(self):
+        self.collection = db_instance.get_db().api_credentials
 
+    def create_credential(self, user_id: str, nickname: str, 
+                         api_key_encrypted: bytes, api_secret_encrypted: bytes) -> Optional[str]:
+        try:
+            from database.models import APICredentialModel
+            cred_data = APICredentialModel.create(user_id, nickname, api_key_encrypted, api_secret_encrypted)
+            result = self.collection.insert_one(cred_data)
+            return str(result.inserted_id)
+        except Exception as e:
+            logger.error(f"Error creating API credential: {e}")
+            return None
 
-async def get_user_by_telegram_id(db: AsyncIOMotorDatabase, telegram_id: int) -> Optional[Dict]:
-    """Get user by Telegram ID"""
-    user = await db.users.find_one({"telegram_id": telegram_id})
-    if user:
-        user["_id"] = str(user["_id"])
-    return user
+    def get_user_credentials(self, user_id: str) -> List[Dict]:
+        return list(self.collection.find({'user_id': user_id}))
 
+    def get_active_credential(self, user_id: str) -> Optional[Dict]:
+        return self.collection.find_one({'user_id': user_id, 'is_active': True})
 
-async def get_user_by_id(db: AsyncIOMotorDatabase, user_id: str) -> Optional[Dict]:
-    """Get user by database ID"""
-    user = await db.users.find_one({"_id": ObjectId(user_id)})
-    if user:
-        user["_id"] = str(user["_id"])
-    return user
+    def set_active_credential(self, user_id: str, api_id: str) -> bool:
+        try:
+            # Deactivate all
+            self.collection.update_many({'user_id': user_id}, {'$set': {'is_active': False}})
+            # Activate selected
+            self.collection.update_one({'_id': ObjectId(api_id)}, {'$set': {'is_active': True}})
+            return True
+        except Exception as e:
+            logger.error(f"Error setting active credential: {e}")
+            return False
 
+class StrategyCRUD:
+    def __init__(self):
+        self.collection = db_instance.get_db().strategies
 
-# ==================== API CREDENTIALS OPERATIONS ====================
+    def create_strategy(self, user_id: str, api_id: str, name: str, 
+                       strategy_type: str, lot_size: int, direction: str, **kwargs) -> Optional[str]:
+        try:
+            from database.models import StrategyModel
+            strategy_data = StrategyModel.create(user_id, api_id, name, strategy_type, 
+                                                lot_size, direction, **kwargs)
+            result = self.collection.insert_one(strategy_data)
+            return str(result.inserted_id)
+        except Exception as e:
+            logger.error(f"Error creating strategy: {e}")
+            return None
 
-async def create_api_credential(
-    db: AsyncIOMotorDatabase,
-    user_id: str,
-    nickname: str,
-    api_key_encrypted: str,
-    api_secret_encrypted: str
-) -> str:
-    """Create new API credential"""
-    credential_data = {
-        "user_id": user_id,  # ✅ FIXED - store as string
-        "nickname": nickname,
-        "api_key_encrypted": api_key_encrypted,
-        "api_secret_encrypted": api_secret_encrypted,
-        "is_active": True,
-        "created_at": datetime.utcnow()
-    }
-    result = await db.api_credentials.insert_one(credential_data)
-    return str(result.inserted_id)
+    def get_user_strategies(self, user_id: str) -> List[Dict]:
+        return list(self.collection.find({'user_id': user_id}))
 
+    def get_strategy_by_id(self, strategy_id: str) -> Optional[Dict]:
+        try:
+            return self.collection.find_one({'_id': ObjectId(strategy_id)})
+        except:
+            return None
 
-async def get_user_api_credentials(db: AsyncIOMotorDatabase, user_id: str) -> List[Dict]:
-    """Get all API credentials for a user"""
-    credentials = []
-    cursor = db.api_credentials.find({"user_id": user_id})  # ✅ FIXED
-    async for credential in cursor:
-        credential["_id"] = str(credential["_id"])
-        credentials.append(credential)
-    return credentials
+    def delete_strategy(self, strategy_id: str) -> bool:
+        try:
+            result = self.collection.delete_one({'_id': ObjectId(strategy_id)})
+            return result.deleted_count > 0
+        except Exception as e:
+            logger.error(f"Error deleting strategy: {e}")
+            return False
 
+class TradeCRUD:
+    def __init__(self):
+        self.collection = db_instance.get_db().trades
 
-async def get_api_credential_by_id(db: AsyncIOMotorDatabase, api_id: str) -> Optional[Dict]:
-    """Get API credential by ID"""
-    credential = await db.api_credentials.find_one({"_id": ObjectId(api_id)})
-    if credential:
-        credential["_id"] = str(credential["_id"])
-        credential["user_id"] = str(credential["user_id"])
-    return credential
+    def create_trade(self, user_id: str, api_id: str, strategy_id: str, 
+                    strategy_type: str, call_symbol: str, put_symbol: str, 
+                    strike: float, **kwargs) -> Optional[str]:
+        try:
+            from database.models import TradeModel
+            trade_data = TradeModel.create(user_id, api_id, strategy_id, strategy_type,
+                                          call_symbol, put_symbol, strike, **kwargs)
+            result = self.collection.insert_one(trade_data)
+            return str(result.inserted_id)
+        except Exception as e:
+            logger.error(f"Error creating trade: {e}")
+            return None
 
+    def get_active_trades(self, user_id: str) -> List[Dict]:
+        return list(self.collection.find({'user_id': user_id, 'status': 'active'}))
 
-async def set_active_api(db, user_id: str, api_id):
-    """Set API as active"""
-    from bson import ObjectId
-    
-    if isinstance(api_id, str):
-        api_id = ObjectId(api_id)
-    
-    # Deactivate all user's APIs
-    await db.api_credentials.update_many(
-        {"user_id": user_id},
-        {"$set": {"is_active": False}}
-    )
-    
-    # Activate selected one
-    result = await db.api_credentials.update_one(
-        {"_id": api_id, "user_id": user_id},
-        {"$set": {"is_active": True}}
-    )
-    
-    return result.modified_count > 0
+    def get_trade_by_id(self, trade_id: str) -> Optional[Dict]:
+        try:
+            return self.collection.find_one({'_id': ObjectId(trade_id)})
+        except:
+            return None
 
-async def delete_api_credential(db, user_id: str, api_id):
-    """Delete API credential with user verification"""
-    from bson import ObjectId
-    
-    if isinstance(api_id, str):
-        api_id = ObjectId(api_id)
-    
-    result = await db.api_credentials.delete_one({
-        "_id": api_id,
-        "user_id": user_id  # ← Security check
-    })
-    
-    return result.deleted_count > 0
+    def update_trade_exit(self, trade_id: str, call_exit_price: float, 
+                         put_exit_price: float, pnl: float) -> bool:
+        try:
+            from datetime import datetime
+            self.collection.update_one(
+                {'_id': ObjectId(trade_id)},
+                {'$set': {
+                    'call_exit_price': call_exit_price,
+                    'put_exit_price': put_exit_price,
+                    'exit_time': datetime.utcnow(),
+                    'pnl': pnl,
+                    'status': 'closed'
+                }}
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Error updating trade exit: {e}")
+            return False
 
-# ==================== STRATEGY OPERATIONS ====================
-
-async def create_strategy(db: AsyncIOMotorDatabase, strategy_data: Dict) -> str:
-    """Create new trading strategy"""
-    strategy_data["user_id"] = strategy_data["user_id"]  # ✅ FIXED - keep as string
-    strategy_data["api_id"] = ObjectId(strategy_data["api_id"])  # API _id is still ObjectId
-    strategy_data["created_at"] = datetime.utcnow()
-    strategy_data["updated_at"] = datetime.utcnow()
-    
-    result = await db.strategies.insert_one(strategy_data)
-    return str(result.inserted_id)
-
-
-async def get_user_strategies(db: AsyncIOMotorDatabase, user_id: str) -> List[Dict]:
-    """Get all strategies for a user"""
-    strategies = []
-    cursor = db.strategies.find({"user_id": user_id})  # ✅ FIXED
-    async for strategy in cursor:
-        strategy["_id"] = str(strategy["_id"])
-        strategy["api_id"] = str(strategy["api_id"])
-        strategies.append(strategy)
-    return strategies
-
-async def get_strategy_by_id(db: AsyncIOMotorDatabase, strategy_id: str) -> Optional[Dict]:
-    """Get strategy by ID"""
-    strategy = await db.strategies.find_one({"_id": ObjectId(strategy_id)})
-    if strategy:
-        strategy["_id"] = str(strategy["_id"])
-        strategy["user_id"] = str(strategy["user_id"])
-        strategy["api_id"] = str(strategy["api_id"])
-    return strategy
-
-
-async def update_strategy(db: AsyncIOMotorDatabase, strategy_id: str, update_data: Dict):
-    """Update strategy"""
-    update_data["updated_at"] = datetime.utcnow()
-    await db.strategies.update_one(
-        {"_id": ObjectId(strategy_id)},
-        {"$set": update_data}
-    )
-
-
-async def delete_strategy(db: AsyncIOMotorDatabase, strategy_id: str):
-    """Delete strategy"""
-    await db.strategies.delete_one({"_id": ObjectId(strategy_id)})
-
-
-# ==================== TRADE OPERATIONS ====================
-
-async def create_trade(db: AsyncIOMotorDatabase, trade_data: Dict) -> str:
-    """Create new trade"""
-    trade_data["user_id"] = trade_data["user_id"]  # ✅ FIXED - keep as string
-    trade_data["api_id"] = ObjectId(trade_data["api_id"])
-    trade_data["strategy_id"] = ObjectId(trade_data["strategy_id"])
-    trade_data["entry_time"] = datetime.utcnow()
-    trade_data["status"] = "open"
-    trade_data["pnl"] = 0.0
-    
-    result = await db.trades.insert_one(trade_data)
-    return str(result.inserted_id)
-
-
-async def get_user_trades(db: AsyncIOMotorDatabase, user_id: str, status: str = None) -> List[Dict]:
-    """Get all trades for a user"""
-    query = {"user_id": user_id}  # ✅ FIXED
-    if status:
-        query["status"] = status
-    
-    trades = []
-    cursor = db.trades.find(query).sort("entry_time", -1)
-    async for trade in cursor:
-        trade["_id"] = str(trade["_id"])
-        trade["api_id"] = str(trade["api_id"])
-        trade["strategy_id"] = str(trade["strategy_id"])
-        trades.append(trade)
-    return trades
-
-
-async def get_trade_by_id(db: AsyncIOMotorDatabase, trade_id: str) -> Optional[Dict]:
-    """Get trade by ID"""
-    trade = await db.trades.find_one({"_id": ObjectId(trade_id)})
-    if trade:
-        trade["_id"] = str(trade["_id"])
-        trade["user_id"] = str(trade["user_id"])
-        trade["api_id"] = str(trade["api_id"])
-        trade["strategy_id"] = str(trade["strategy_id"])
-    return trade
-
-
-async def update_trade(db: AsyncIOMotorDatabase, trade_id: str, update_data: Dict):
-    """Update trade"""
-    await db.trades.update_one(
-        {"_id": ObjectId(trade_id)},
-        {"$set": update_data}
-    )
-
-
-async def close_trade(
-    db: AsyncIOMotorDatabase,
-    trade_id: str,
-    call_exit_price: float,
-    put_exit_price: float,
-    pnl: float
-):
-    """Close trade"""
-    update_data = {
-        "exit_time": datetime.utcnow(),
-        "call_exit_price": call_exit_price,
-        "put_exit_price": put_exit_price,
-        "pnl": pnl,
-        "status": "closed"
-    }
-    await db.trades.update_one(
-        {"_id": ObjectId(trade_id)},
-        {"$set": update_data}
-    )
-
-
-async def update_trade_status(db: AsyncIOMotorDatabase, trade_id: ObjectId, status: str):
-    """Update trade status"""
-    try:
-        result = await db.trades.update_one(
-            {'_id': ObjectId(trade_id)},
-            {'$set': {'status': status}}
-        )
-        return result.modified_count > 0
-    except Exception as e:
-        bot_logger.error(f"Error updating trade status: {e}")
-        return False
-
-
-# ==================== ORDER OPERATIONS ====================
-
-async def create_order(db: AsyncIOMotorDatabase, order_data: Dict) -> str:
-    """Create new order"""
-    order_data["trade_id"] = ObjectId(order_data["trade_id"])
-    order_data["timestamp"] = datetime.utcnow()
-    
-    result = await db.orders.insert_one(order_data)
-    return str(result.inserted_id)
-
-
-async def get_trade_orders(db: AsyncIOMotorDatabase, trade_id: str) -> List[Dict]:
-    """Get all orders for a trade"""
-    orders = []
-    cursor = db.orders.find({"trade_id": ObjectId(trade_id)})
-    async for order in cursor:
-        order["_id"] = str(order["_id"])
-        order["trade_id"] = str(order["trade_id"])
-        orders.append(order)
-    return orders
-
-
-async def update_order_status(db: AsyncIOMotorDatabase, order_id: str, status: str, price: float = None):
-    """Update order status"""
-    update_data = {"status": status}
-    if price:
-        update_data["price"] = price
-    
-    await db.orders.update_one(
-        {"_id": ObjectId(order_id)},
-        {"$set": update_data}
-    )
- 
-# database/crud.py - ADD THIS FUNCTION AT THE END
-
-# ==================== STRANGLE STRATEGY OPERATIONS ====================
-
-async def get_api_by_id(db: AsyncIOMotorDatabase, api_id: str) -> Optional[Dict]:
-    """
-    Get API credential by ID (for Strangle strategy)
-    
-    Args:
-        db: Database instance
-        api_id: API credential ID (string or ObjectId)
-    
-    Returns:
-        API credential document or None
-    """
-    try:
-        # Convert string ID to ObjectId if needed
-        if isinstance(api_id, str):
-            api_id = ObjectId(api_id)
-        
-        api = await db.api_credentials.find_one({"_id": api_id})
-        
-        if api:
-            api["_id"] = str(api["_id"])
-            api["user_id"] = str(api["user_id"])
-        
-        return api
-    
-    except Exception as e:
-        bot_logger.error(f"Error getting API by ID: {e}")
-        return None
-        
-async def get_active_api(db: AsyncIOMotorDatabase, user_id: str) -> Optional[Dict]:
-    """
-    Get active API for user
-    Args:
-        db: Database instance
-        user_id: Telegram user ID as string
-    Returns:
-        Active API credential or None
-    """
-    try:
-        api = await db.api_credentials.find_one({
-            "user_id": user_id,  # ✅ Query with string
-            "is_active": True
-        })
-        
-        if api:
-            api["_id"] = str(api["_id"])
-            api["user_id"] = str(api["user_id"])
-        
-        return api
-    except Exception as e:
-        bot_logger.error(f"Error getting active API: {e}")
-        return None
-
-# db/crud.py - ADD THIS AT THE VERY END
-
-async def get_active_api(db: AsyncIOMotorDatabase, user_id: str) -> Optional[Dict]:
-    """
-    Get active API for user
-    Args:
-        db: Database instance
-        user_id: Telegram user ID as string
-    Returns:
-        Active API credential or None
-    """
-    try:
-        api = await db.api_credentials.find_one({
-            "user_id": user_id,  # ✅ Query with string
-            "is_active": True
-        })
-        
-        if api:
-            api["_id"] = str(api["_id"])
-            api["user_id"] = str(api["user_id"])
-        
-        return api
-    except Exception as e:
-        bot_logger.error(f"Error getting active API: {e}")
-        return None
+    def get_trade_history(self, user_id: str, limit: int = 20) -> List[Dict]:
+        return list(self.collection.find({'user_id': user_id})
+                   .sort('entry_time', -1).limit(limit))
         
