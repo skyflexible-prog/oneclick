@@ -96,6 +96,7 @@ from bot.order_management import (
     AWAITING_LIMIT_PRICE,
 )
 
+from bot.strangle_strategy import strangle_conv_handler
 from utils.logger import bot_logger, trade_logger
 
 # Initialize Telegram Bot Application
