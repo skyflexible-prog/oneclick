@@ -358,3 +358,35 @@ async def update_order_status(db: AsyncIOMotorDatabase, order_id: str, status: s
         {"$set": update_data}
     )
  
+# database/crud.py - ADD THIS FUNCTION AT THE END
+
+# ==================== STRANGLE STRATEGY OPERATIONS ====================
+
+async def get_api_by_id(db: AsyncIOMotorDatabase, api_id: str) -> Optional[Dict]:
+    """
+    Get API credential by ID (for Strangle strategy)
+    
+    Args:
+        db: Database instance
+        api_id: API credential ID (string or ObjectId)
+    
+    Returns:
+        API credential document or None
+    """
+    try:
+        # Convert string ID to ObjectId if needed
+        if isinstance(api_id, str):
+            api_id = ObjectId(api_id)
+        
+        api = await db.api_credentials.find_one({"_id": api_id})
+        
+        if api:
+            api["_id"] = str(api["_id"])
+            api["user_id"] = str(api["user_id"])
+        
+        return api
+    
+    except Exception as e:
+        bot_logger.error(f"Error getting API by ID: {e}")
+        return None
+        
