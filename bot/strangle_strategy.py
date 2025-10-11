@@ -310,3 +310,271 @@ async def enter_strike_value(update: Update, context: ContextTypes.DEFAULT_TYPE)
             "❌ Invalid number. Please enter a valid number."
         )
         return ENTERING_STRIKE_VALUE
+
+
+# bot/strangle_strategy.py - PART 2 (CONTINUED)
+
+async def select_sl_trigger_method(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """SL trigger method selected"""
+    query = update.callback_query
+    await query.answer()
+    
+    method = query.data.split('_')[-1]
+    context.user_data['sl_trigger_method'] = method
+    
+    if method == "percentage":
+        prompt = "Enter trigger percentage (e.g., 50 for 50% loss):"
+        example = "• <code>50</code> → Trigger at 50% loss\n• <code>75</code> → Trigger at 75% loss"
+    elif method == "numerical":
+        prompt = "Enter trigger amount in dollars:"
+        example = "• <code>100</code> → Trigger at $100 loss\n• <code>250</code> → Trigger at $250 loss"
+    else:  # multiple
+        prompt = "Enter trigger multiple (e.g., 2 for 2x entry):"
+        example = "• <code>2</code> → Trigger at 2x entry cost\n• <code>1.5</code> → Trigger at 1.5x entry cost"
+    
+    await query.edit_message_text(
+        f"<b>🛡️ Stop-Loss Trigger Value</b>\n\n"
+        f"{prompt}\n\n"
+        f"<b>Examples:</b>\n{example}\n\n"
+        "Type value:",
+        parse_mode=ParseMode.HTML
+    )
+    
+    return ENTERING_SL_TRIGGER
+
+
+async def enter_sl_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """User entered SL trigger value"""
+    try:
+        value = float(update.message.text.strip())
+        
+        if value <= 0:
+            await update.message.reply_text(
+                "❌ Invalid value. Please enter a positive number."
+            )
+            return ENTERING_SL_TRIGGER
+        
+        context.user_data['sl_trigger_value'] = value
+        
+        # Ask for SL limit method
+        keyboard = [
+            [InlineKeyboardButton("📊 Percentage", callback_data="sl_limit_percentage")],
+            [InlineKeyboardButton("💰 Numerical", callback_data="sl_limit_numerical")],
+            [InlineKeyboardButton("📈 Multiple", callback_data="sl_limit_multiple")]
+        ]
+        
+        await update.message.reply_text(
+            "<b>🛡️ Stop-Loss Limit Method</b>\n\n"
+            "Limit price should be slightly worse than trigger.\n\n"
+            "<b>📊 Percentage:</b>\n"
+            "• % loss from entry\n"
+            "• Example: 55% (if trigger is 50%)\n\n"
+            "<b>💰 Numerical:</b>\n"
+            "• Fixed dollar amount\n"
+            "• Example: $110 (if trigger is $100)\n\n"
+            "<b>📈 Multiple:</b>\n"
+            "• Multiple of entry cost\n"
+            "• Example: 2.2x (if trigger is 2x)\n\n"
+            "Choose method:",
+            parse_mode=ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+        
+        return SELECTING_SL_LIMIT_METHOD
+    
+    except ValueError:
+        await update.message.reply_text(
+            "❌ Invalid number. Please enter a valid number."
+        )
+        return ENTERING_SL_TRIGGER
+
+
+async def select_sl_limit_method(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """SL limit method selected"""
+    query = update.callback_query
+    await query.answer()
+    
+    method = query.data.split('_')[-1]
+    context.user_data['sl_limit_method'] = method
+    
+    if method == "percentage":
+        prompt = "Enter limit percentage (should be > trigger):"
+        example = "• <code>55</code> → Limit at 55% loss"
+    elif method == "numerical":
+        prompt = "Enter limit amount in dollars (should be > trigger):"
+        example = "• <code>110</code> → Limit at $110 loss"
+    else:  # multiple
+        prompt = "Enter limit multiple (should be > trigger):"
+        example = "• <code>2.2</code> → Limit at 2.2x entry cost"
+    
+    await query.edit_message_text(
+        f"<b>🛡️ Stop-Loss Limit Value</b>\n\n"
+        f"{prompt}\n\n"
+        f"<b>Examples:</b>\n{example}\n\n"
+        "Type value:",
+        parse_mode=ParseMode.HTML
+    )
+    
+    return ENTERING_SL_LIMIT
+
+
+async def enter_sl_limit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """User entered SL limit value"""
+    try:
+        value = float(update.message.text.strip())
+        
+        if value <= 0:
+            await update.message.reply_text(
+                "❌ Invalid value. Please enter a positive number."
+            )
+            return ENTERING_SL_LIMIT
+        
+        context.user_data['sl_limit_value'] = value
+        
+        # Ask for preset name
+        await update.message.reply_text(
+            "<b>📝 Preset Name</b>\n\n"
+            "Enter a name for this preset:\n\n"
+            "<b>Examples:</b>\n"
+            "• <code>5% OTM Long Strangle</code>\n"
+            "• <code>ATM+2 Short Strangle</code>\n"
+            "• <code>My Strangle Strategy</code>\n\n"
+            "Type name:",
+            parse_mode=ParseMode.HTML
+        )
+        
+        return ENTERING_PRESET_NAME
+    
+    except ValueError:
+        await update.message.reply_text(
+            "❌ Invalid number. Please enter a valid number."
+        )
+        return ENTERING_SL_LIMIT
+
+
+async def enter_preset_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """User entered preset name - Show review"""
+    preset_name = update.message.text.strip()
+    
+    if len(preset_name) < 3:
+        await update.message.reply_text(
+            "❌ Name too short. Please enter at least 3 characters."
+        )
+        return ENTERING_PRESET_NAME
+    
+    context.user_data['preset_name'] = preset_name
+    
+    # Build review message
+    direction = context.user_data['strangle_direction']
+    strike_method = context.user_data['strike_method']
+    strike_type = context.user_data.get('strike_type', 'N/A')
+    strike_value = context.user_data['strike_value']
+    sl_trigger_method = context.user_data['sl_trigger_method']
+    sl_trigger_value = context.user_data['sl_trigger_value']
+    sl_limit_method = context.user_data['sl_limit_method']
+    sl_limit_value = context.user_data['sl_limit_value']
+    
+    # Format strike display
+    if strike_method == "percentage":
+        strike_display = f"{strike_value}% {strike_type.upper()}"
+    else:
+        strike_display = f"ATM±{int(strike_value)}"
+    
+    # Format SL display
+    sl_trigger_display = f"{sl_trigger_value}"
+    if sl_trigger_method == "percentage":
+        sl_trigger_display += "%"
+    elif sl_trigger_method == "numerical":
+        sl_trigger_display = f"${sl_trigger_display}"
+    else:
+        sl_trigger_display += "x"
+    
+    sl_limit_display = f"{sl_limit_value}"
+    if sl_limit_method == "percentage":
+        sl_limit_display += "%"
+    elif sl_limit_method == "numerical":
+        sl_limit_display = f"${sl_limit_display}"
+    else:
+        sl_limit_display += "x"
+    
+    review_message = (
+        f"<b>📊 Strangle Preset Review</b>\n\n"
+        f"<b>Name:</b> {preset_name}\n"
+        f"<b>Direction:</b> {direction.capitalize()} Strangle\n"
+        f"<b>Asset:</b> BTC\n"
+        f"<b>Expiry:</b> Daily\n\n"
+        f"<b>Strike Selection:</b>\n"
+        f"• Method: {strike_method.replace('_', ' ').title()}\n"
+        f"• Value: {strike_display}\n\n"
+        f"<b>Stop-Loss:</b>\n"
+        f"• Trigger: {sl_trigger_display} ({sl_trigger_method})\n"
+        f"• Limit: {sl_limit_display} ({sl_limit_method})\n\n"
+        f"Confirm to save this preset?"
+    )
+    
+    keyboard = [
+        [InlineKeyboardButton("✅ Confirm", callback_data="strangle_confirm")],
+        [InlineKeyboardButton("❌ Cancel", callback_data="strangle_menu")]
+    ]
+    
+    await update.message.reply_text(
+        review_message,
+        parse_mode=ParseMode.HTML,
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+    
+    return REVIEWING_STRANGLE
+
+
+async def confirm_strangle_preset(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Save the strangle preset"""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = query.from_user.id
+    db = Database.get_database()
+    
+    try:
+        # Create preset
+        preset_id = await create_strangle_preset(
+            db=db,
+            user_id=user_id,
+            api_id=context.user_data['strangle_api_id'],
+            preset_name=context.user_data['preset_name'],
+            direction=context.user_data['strangle_direction'],
+            strike_method=context.user_data['strike_method'],
+            strike_type=context.user_data.get('strike_type'),
+            strike_value=context.user_data['strike_value'],
+            sl_trigger_method=context.user_data['sl_trigger_method'],
+            sl_trigger_value=context.user_data['sl_trigger_value'],
+            sl_limit_method=context.user_data['sl_limit_method'],
+            sl_limit_value=context.user_data['sl_limit_value']
+        )
+        
+        await query.edit_message_text(
+            f"✅ <b>Preset Created!</b>\n\n"
+            f"<b>Name:</b> {context.user_data['preset_name']}\n\n"
+            f"Your strangle preset has been saved.\n"
+            f"Use 'Execute Preset' to trade with this configuration.",
+            parse_mode=ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("🔙 Back to Strangle Menu", callback_data="strangle_menu")
+            ]])
+        )
+        
+        # Clear context
+        context.user_data.clear()
+        
+        return ConversationHandler.END
+    
+    except Exception as e:
+        bot_logger.error(f"Error creating strangle preset: {e}")
+        await query.edit_message_text(
+            f"❌ <b>Error</b>\n\nFailed to create preset: {str(e)}",
+            parse_mode=ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("🔙 Back", callback_data="strangle_menu")
+            ]])
+        )
+        return ConversationHandler.END
+        
