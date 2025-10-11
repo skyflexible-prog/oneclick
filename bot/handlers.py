@@ -535,7 +535,7 @@ async def receive_api_secret(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     clear_user_session(user.id)
     return ConversationHandler.END
-
+    
 
 async def list_apis(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """List all user APIs"""
@@ -543,11 +543,10 @@ async def list_apis(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     
     db = Database.get_database()
-    user_id = str(query.from_user.id)  # ← FIX: Use Telegram ID as string
+    user_id = str(query.from_user.id)
     
     bot_logger.info(f"📋 Listing APIs for user {user_id}")
     
-    # ✅ FIX: Query with user_id string, not user_data['_id']
     apis = await crud.get_user_api_credentials(db, user_id)
     
     bot_logger.info(f"   Found {len(apis)} API(s)")
@@ -561,7 +560,6 @@ async def list_apis(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=get_api_management_keyboard()
             )
         except Exception as e:
-            # If edit fails, send new message
             await query.message.reply_text(
                 "📋 <b>API Credentials</b>\n\n"
                 "You haven't added any API credentials yet.",
@@ -574,27 +572,34 @@ async def list_apis(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = "📋 <b>Your API Credentials</b>\n\n"
     
     for i, api in enumerate(apis, 1):
-        status = "✅ Active" if api.get('is_active') else "⚪ Inactive"
+        is_active = api.get('is_active', False)
+        status = "✅ Active" if is_active else "⚪ Inactive"
         nickname = api.get('nickname', 'Unnamed')
-        api_id = str(api.get('_id'))
+        api_id_short = str(api.get('_id'))[:8]
         
         message += f"<b>{i}. {nickname}</b>\n"
         message += f"   Status: {status}\n"
-        message += f"   ID: <code>{api_id[:8]}...</code>\n\n"
+        message += f"   ID: {api_id_short}...\n\n"
     
     message += f"<b>Total:</b> {len(apis)} API(s)\n\n"
     message += "Select an option below:"
     
-    # Build keyboard with action buttons
+    # Build keyboard
     keyboard = []
     
-    # Add activate/delete buttons for each API
+    # ✅ ADD THIS: "Add New API" button at the top
+    keyboard.append([
+        InlineKeyboardButton("➕ Add New API", callback_data="add_api")
+    ])
+    
+    # Add delete buttons for each API
     for api in apis:
         nickname = api.get('nickname', 'Unnamed')
         api_id = str(api.get('_id'))
+        is_active = api.get('is_active', False)
         
         # Activate button (if not active)
-        if not api.get('is_active'):
+        if not is_active:
             keyboard.append([
                 InlineKeyboardButton(
                     f"✅ Activate {nickname}", 
