@@ -559,54 +559,69 @@ async def delete_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ==================== CALLBACK QUERY HANDLERS ====================
 
+# bot/handlers.py - UPDATE button_callback
+
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle all button callbacks"""
     query = update.callback_query
+    await query.answer()
+    
     data = query.data
     
     # Main menu
     if data == "main_menu":
-        await query.answer()
         await query.edit_message_text(
-            "🏠 <b>Main Menu</b>\n\nSelect an option:",
+            "🏠 <b>Main Menu</b>\n\n"
+            "Select an option:",
             parse_mode=ParseMode.HTML,
-            reply_markup=get_main_menu_keyboard()
+            reply_markup=get_main_menu_keyboard()  # ✅ USE UPDATED KEYBOARD
         )
+        return
     
     # Help
     elif data == "help":
-        await help_command(update, context)
-    
-    # Balance
-    elif data == "balance":
-        await balance_command(update, context)
-    
-    # API Management
-    elif data == "api_menu":
-        await query.answer()
-        await query.edit_message_text(
-            "⚙️ <b>API Management</b>\n\nManage your Delta Exchange API credentials:",
-            parse_mode=ParseMode.HTML,
-            reply_markup=get_api_management_keyboard()
+        help_text = (
+            "❓ <b>Help & Support</b>\n\n"
+            "<b>How to use this bot:</b>\n\n"
+            "1️⃣ <b>Add API Keys:</b>\n"
+            "   • Click 'API Keys'\n"
+            "   • Add your Delta Exchange credentials\n"
+            "   • Activate the API you want to use\n\n"
+            "2️⃣ <b>Create Strategy:</b>\n"
+            "   • Click 'Strategies'\n"
+            "   • Configure your trading parameters\n"
+            "   • Save the strategy\n\n"
+            "3️⃣ <b>Execute Trade:</b>\n"
+            "   • Click 'Trade'\n"
+            "   • Select your strategy\n"
+            "   • Confirm execution\n\n"
+            "<b>📊 Features:</b>\n"
+            "• <b>Trade:</b> Execute preset strategies\n"
+            "• <b>Orders:</b> View and manage orders\n"
+            "• <b>Positions:</b> Monitor open positions\n"
+            "• <b>Strangle:</b> Create strangle strategies\n"  # ✅ MENTIONED
+            "• <b>History:</b> View past trades\n"
+            "• <b>Balance:</b> Check account balance\n\n"
+            "<b>Need help?</b> Contact support."
         )
+        
+        keyboard = [
+            [InlineKeyboardButton("🔙 Back to Menu", callback_data="main_menu")]
+        ]
+        
+        await query.edit_message_text(
+            help_text,
+            parse_mode=ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+        return
     
-    elif data == "list_apis":
-        await list_apis(update, context)
-    
-    elif data.startswith("view_api_"):
-        await view_api_details(update, context)
-    
-    elif data.startswith("activate_api_"):
-        api_id = data.split('_')[-1]
-        user = update.effective_user
-        db = Database.get_database()
-        user_data = await crud.get_user_by_telegram_id(db, user.id)
-        await crud.set_active_api(db, user_data['_id'], api_id)
-        await query.answer("✅ API activated!", show_alert=True)
-        await view_api_details(update, context)
-    
-    # More handlers will be added in next part...
-  
+    # If no match, show main menu
+    await query.edit_message_text(
+        "Please select an option:",
+        reply_markup=get_main_menu_keyboard()
+    )
+
 # ==================== STRATEGY MANAGEMENT HANDLERS ====================
 
 async def create_strategy_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
