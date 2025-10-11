@@ -718,6 +718,8 @@ async def delete_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ==================== CALLBACK QUERY HANDLERS ====================
 
+# bot/handlers.py - REPLACE ENTIRE button_callback FUNCTION
+
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle all button callbacks"""
     query = update.callback_query
@@ -735,66 +737,48 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     
-    # Balance
-    elif data == "balance":
+    # Trade button
+    elif data == "trade":
         db = Database.get_database()
         user_id = str(query.from_user.id)  # ✅ FIX
         
-        api = await crud.get_active_api(db, user_id)
+        bot_logger.info(f"📊 Trade button: user={user_id}")
         
-        if not api:
+        # Check for APIs
+        apis = await crud.get_user_api_credentials(db, user_id)
+        
+        if not apis:
             await query.edit_message_text(
-                "⚠️ <b>No Active API</b>\n\n"
-                "Please add and activate an API first.\n\n"
-                "Go to: 🔑 API Keys → ➕ Add API",
+                "⚠️ <b>No API Credentials</b>\n\n"
+                "Please add your Delta Exchange API credentials first.\n\n"
+                "Go to: 🔑 API Keys → ➕ Add New API",
                 parse_mode=ParseMode.HTML,
                 reply_markup=get_main_menu_keyboard()
             )
             return
         
+        # Continue with trade flow (existing code)
         await query.edit_message_text(
-            "💰 <b>Balance</b>\n\nFetching balance...",
+            "📊 <b>Trade</b>\n\nSelect strategy...",
             parse_mode=ParseMode.HTML
         )
-        # TODO: Implement actual balance fetching
         return
     
-    # Positions
-    elif data == "positions":
-        db = Database.get_database()
-        user_id = str(query.from_user.id)  # ✅ FIX
-        
-        api = await crud.get_active_api(db, user_id)
-        
-        if not api:
-            await query.edit_message_text(
-                "⚠️ <b>No Active API</b>\n\n"
-                "Please add and activate an API first.\n\n"
-                "Go to: 🔑 API Keys → ➕ Add API",
-                parse_mode=ParseMode.HTML,
-                reply_markup=get_main_menu_keyboard()
-            )
-            return
-        
-        await query.edit_message_text(
-            "📊 <b>Positions</b>\n\nFetching positions...",
-            parse_mode=ParseMode.HTML
-        )
-        # TODO: Implement actual positions fetching
-        return
-    
-    # Orders
+    # Orders button
     elif data == "orders":
         db = Database.get_database()
         user_id = str(query.from_user.id)  # ✅ FIX
         
+        bot_logger.info(f"📋 Orders button: user={user_id}")
+        
+        # Check for active API
         api = await crud.get_active_api(db, user_id)
         
         if not api:
             await query.edit_message_text(
-                "⚠️ <b>No Active API</b>\n\n"
-                "Please add and activate an API first.\n\n"
-                "Go to: 🔑 API Keys → ➕ Add API",
+                "⚠️ <b>No API Credentials</b>\n\n"
+                "Please add your Delta Exchange API credentials first.\n\n"
+                "Go to: 🔑 API Keys → ➕ Add New API",
                 parse_mode=ParseMode.HTML,
                 reply_markup=get_main_menu_keyboard()
             )
@@ -802,16 +786,46 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         await query.edit_message_text(
             "📋 <b>Orders</b>\n\nFetching orders...",
-            parse_mode=ParseMode.HTML
+            parse_mode=ParseMode.HTML,
+            reply_markup=get_main_menu_keyboard()
         )
-        # TODO: Implement actual orders fetching
         return
     
-    # History
+    # Positions button
+    elif data == "positions":
+        db = Database.get_database()
+        user_id = str(query.from_user.id)  # ✅ FIX
+        
+        bot_logger.info(f"📊 Positions button: user={user_id}")
+        
+        # Check for active API
+        api = await crud.get_active_api(db, user_id)
+        
+        if not api:
+            await query.edit_message_text(
+                "⚠️ <b>No API Credentials</b>\n\n"
+                "Please add your Delta Exchange API credentials first.\n\n"
+                "Go to: 🔑 API Keys → ➕ Add New API",
+                parse_mode=ParseMode.HTML,
+                reply_markup=get_main_menu_keyboard()
+            )
+            return
+        
+        await query.edit_message_text(
+            "📊 <b>Positions</b>\n\nFetching positions...",
+            parse_mode=ParseMode.HTML,
+            reply_markup=get_main_menu_keyboard()
+        )
+        return
+    
+    # History button
     elif data == "history":
         db = Database.get_database()
         user_id = str(query.from_user.id)  # ✅ FIX
         
+        bot_logger.info(f"📜 History button: user={user_id}")
+        
+        # Get closed trades
         trades = await crud.get_user_trades(db, user_id, status="closed")
         
         if not trades:
@@ -832,11 +846,41 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     
-    # Strategies
+    # Balance button
+    elif data == "balance":
+        db = Database.get_database()
+        user_id = str(query.from_user.id)  # ✅ FIX
+        
+        bot_logger.info(f"💰 Balance button: user={user_id}")
+        
+        # Check for active API
+        api = await crud.get_active_api(db, user_id)
+        
+        if not api:
+            await query.edit_message_text(
+                "⚠️ <b>No API Credentials</b>\n\n"
+                "Please add your Delta Exchange API credentials first.\n\n"
+                "Go to: 🔑 API Keys → ➕ Add New API",
+                parse_mode=ParseMode.HTML,
+                reply_markup=get_main_menu_keyboard()
+            )
+            return
+        
+        await query.edit_message_text(
+            "💰 <b>Balance</b>\n\nFetching balance...",
+            parse_mode=ParseMode.HTML,
+            reply_markup=get_main_menu_keyboard()
+        )
+        return
+    
+    # Strategies button
     elif data == "strategies":
         db = Database.get_database()
         user_id = str(query.from_user.id)  # ✅ FIX
         
+        bot_logger.info(f"⚙️ Strategies button: user={user_id}")
+        
+        # Get strategies
         strategies = await crud.get_user_strategies(db, user_id)
         
         if not strategies:
@@ -945,10 +989,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     
-    # ✅ Skip strangle action callbacks - Let ConversationHandler handle them
-    # Don't add any handling for strangle_create, strangle_execute, strangle_manage
-    
-    # ✅ Fallback - Only if no match above
+    # Fallback - Only if no match above
     if not data.startswith("strangle_") and not data.startswith("activate_api_") and not data.startswith("delete_api_"):
         await query.edit_message_text(
             "Please select an option:",
