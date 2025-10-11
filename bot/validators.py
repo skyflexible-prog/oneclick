@@ -1,145 +1,59 @@
 import re
 from typing import Optional, Tuple
 
+def validate_lot_size(lot_size_str: str) -> Tuple[bool, Optional[int], str]:
+    """Validate lot size input"""
+    try:
+        lot_size = int(lot_size_str)
+        if lot_size <= 0:
+            return False, None, "Lot size must be positive"
+        if lot_size > 1000:
+            return False, None, "Lot size too large (max 1000)"
+        return True, lot_size, "Valid"
+    except ValueError:
+        return False, None, "Invalid number format"
 
-class InputValidator:
-    """Validate user inputs"""
-    
-    @staticmethod
-    def validate_api_key(api_key: str) -> Tuple[bool, str]:
-        """Validate Delta Exchange API key format"""
-        if not api_key or len(api_key.strip()) == 0:
-            return False, "API key cannot be empty"
-        
-        api_key = api_key.strip()
-        
-        if len(api_key) < 20:
-            return False, "API key too short"
-        
-        if not re.match(r'^[A-Za-z0-9_-]+$', api_key):
-            return False, "API key contains invalid characters"
-        
-        return True, "Valid"
-    
-    @staticmethod
-    def validate_api_secret(api_secret: str) -> Tuple[bool, str]:
-        """Validate Delta Exchange API secret format"""
-        if not api_secret or len(api_secret.strip()) == 0:
-            return False, "API secret cannot be empty"
-        
-        api_secret = api_secret.strip()
-        
-        if len(api_secret) < 20:
-            return False, "API secret too short"
-        
-        return True, "Valid"
-    
-    @staticmethod
-    def validate_nickname(nickname: str) -> Tuple[bool, str]:
-        """Validate API/strategy nickname"""
-        if not nickname or len(nickname.strip()) == 0:
-            return False, "Nickname cannot be empty"
-        
-        nickname = nickname.strip()
-        
-        if len(nickname) < 3:
-            return False, "Nickname must be at least 3 characters"
-        
-        if len(nickname) > 50:
-            return False, "Nickname must be less than 50 characters"
-        
-        if not re.match(r'^[A-Za-z0-9_ -]+$', nickname):
-            return False, "Nickname can only contain letters, numbers, spaces, underscores, and hyphens"
-        
-        return True, "Valid"
-    
-    @staticmethod
-    def validate_lot_size(lot_size_str: str) -> Tuple[bool, str, Optional[int]]:
-        """Validate lot size input"""
-        try:
-            lot_size = int(lot_size_str.strip())
-            
-            if lot_size <= 0:
-                return False, "Lot size must be greater than 0", None
-            
-            if lot_size > 100:
-                return False, "Lot size seems too large (max 100)", None
-            
-            return True, "Valid", lot_size
-        
-        except ValueError:
-            return False, "Lot size must be a number", None
-    
-    @staticmethod
-    def validate_percentage(percent_str: str, allow_zero: bool = False) -> Tuple[bool, str, Optional[float]]:
-        """Validate percentage input"""
-        try:
-            percent = float(percent_str.strip())
-            
-            if not allow_zero and percent <= 0:
-                return False, "Percentage must be greater than 0", None
-            
-            if percent < 0:
-                return False, "Percentage cannot be negative", None
-            
-            if percent > 100:
-                return False, "Percentage cannot exceed 100%", None
-            
-            return True, "Valid", percent
-        
-        except ValueError:
-            return False, "Percentage must be a number", None
-    
-    @staticmethod
-    def validate_capital(capital_str: str) -> Tuple[bool, str, Optional[float]]:
-        """
-        Validate capital/amount input
-        Allows 0 for unlimited capital
-        """
-        try:
-            capital = float(capital_str.strip())
-        
-            # ✅ Allow 0 for unlimited capital
-            if capital == 0:
-                return True, "Valid", 0.0
-        
-            # For non-zero values, apply normal validation
-            if capital < 0:
-                return False, "Capital must be 0 or greater", None
-        
-            if capital < 1000:
-                return False, "Minimum capital is ₹1,000 (or 0 for unlimited)", None
-        
-            if capital > 10000000:  # 1 crore
-                return False, "Capital seems too large", None
-        
-            return True, "Valid", capital
-    
-        except ValueError:
-            return False, "Capital must be a number or 0 for unlimited", None
-    
-    @staticmethod
-    def validate_strike_offset(offset_str: str) -> Tuple[bool, str, Optional[int]]:
-        """Validate strike offset input"""
-        try:
-            offset = int(offset_str.strip())
-            
-            if offset < -10 or offset > 10:
-                return False, "Strike offset must be between -10 and +10", None
-            
-            return True, "Valid", offset
-        
-        except ValueError:
-            return False, "Strike offset must be a number", None
-    
-    @staticmethod
-    def sanitize_text(text: str, max_length: int = 100) -> str:
-        """Sanitize text input"""
-        # Remove special characters except basic ones
-        text = re.sub(r'[^A-Za-z0-9 _.,!?-]', '', text)
-        # Truncate to max length
-        return text[:max_length].strip()
+def validate_percentage(pct_str: str) -> Tuple[bool, Optional[float], str]:
+    """Validate percentage input"""
+    try:
+        pct = float(pct_str)
+        if pct < 0:
+            return False, None, "Percentage cannot be negative"
+        if pct > 100:
+            return False, None, "Percentage cannot exceed 100%"
+        return True, pct, "Valid"
+    except ValueError:
+        return False, None, "Invalid percentage format"
 
+def validate_api_credentials(api_key: str, api_secret: str) -> Tuple[bool, str]:
+    """Validate API key and secret format"""
+    if len(api_key) < 10:
+        return False, "API key too short"
+    if len(api_secret) < 10:
+        return False, "API secret too short"
+    if ' ' in api_key or ' ' in api_secret:
+        return False, "API credentials cannot contain spaces"
+    return True, "Valid"
 
-# Create global validator instance
-validator = InputValidator()
+def validate_strategy_name(name: str) -> Tuple[bool, str]:
+    """Validate strategy name"""
+    if len(name) < 3:
+        return False, "Strategy name too short (min 3 characters)"
+    if len(name) > 50:
+        return False, "Strategy name too long (max 50 characters)"
+    if not re.match(r'^[a-zA-Z0-9_\s]+$', name):
+        return False, "Strategy name can only contain letters, numbers, spaces, and underscores"
+    return True, "Valid"
+
+def validate_strike_offset(offset_str: str) -> Tuple[bool, Optional[int], str]:
+    """Validate strike offset"""
+    try:
+        offset = int(offset_str)
+        if offset < 0:
+            return False, None, "Offset cannot be negative"
+        if offset > 20:
+            return False, None, "Offset too large (max 20 strikes)"
+        return True, offset, "Valid"
+    except ValueError:
+        return False, None, "Invalid offset format"
+        
