@@ -741,6 +741,18 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await list_apis(update, context)
     elif data == "add_api":
         await add_api(update, context)
+    elif data == "strangle_menu":
+        keyboard = [
+            [InlineKeyboardButton("📝 Create", callback_data="strangle_create")],
+            [InlineKeyboardButton("▶️ Execute", callback_data="strangle_execute")],
+            [InlineKeyboardButton("📋 Manage", callback_data="strangle_manage")],
+            [InlineKeyboardButton("🔙 Back", callback_data="main_menu")]
+        ]
+        await query.edit_message_text(
+            "🎲 <b>Strangle Strategy</b>",
+            parse_mode=ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
     elif data == "help":
         await query.edit_message_text(
             "❓ <b>Help</b>",
@@ -752,7 +764,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Select:",
             reply_markup=get_main_menu_keyboard()
         )
-
 
 async def create_strategy_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Start strategy creation conversation"""
