@@ -567,6 +567,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     
     data = query.data
+    bot_logger.info(f"🔘 Button callback: {data}")  # ✅ DEBUG LOG
     
     # Main menu
     if data == "main_menu":
@@ -580,7 +581,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # ✅ ADD THIS - Strangle Menu Handler
     elif data == "strangle_menu":
-        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
         
         strangle_text = (
             "🎲 <b>Strangle Strategy</b>\n\n"
