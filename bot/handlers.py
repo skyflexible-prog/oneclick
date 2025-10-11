@@ -998,33 +998,44 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ==================== STRATEGY MANAGEMENT HANDLERS ====================
 
+# bot/handlers.py - REPLACE create_strategy_start FUNCTION
+
 async def create_strategy_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Start strategy creation conversation"""
     user = update.effective_user
     db = Database.get_database()
     
-    # Check if user has active API
-    user_data = await crud.get_user_by_telegram_id(db, user.id)
-    apis = await crud.get_user_api_credentials(db, user_data['_id'])
-    active_api = next((api for api in apis if api['is_active']), None)
+    # ✅ FIX: Use direct user_id
+    user_id = str(user.id)
+    
+    bot_logger.info(f"🎯 Creating strategy for user {user_id}")
+    
+    # Get APIs
+    apis = await crud.get_user_api_credentials(db, user_id)
+    
+    # Get active API
+    active_api = next((api for api in apis if api.get('is_active')), None) if apis else None
     
     if not active_api:
         await update.callback_query.answer()
         await update.callback_query.edit_message_text(
-            "❌ You need to add an API first before creating strategies.",
+            "⚠️ <b>No API Credentials</b>\n\n"
+            "You need to add an API first before creating strategies.\n\n"
+            "Go to: 🔑 API Keys → ➕ Add New API",
             parse_mode=ParseMode.HTML,
             reply_markup=get_api_management_keyboard()
         )
         return ConversationHandler.END
     
+    # Store session data
     session = get_user_session(user.id)
     session['creating_strategy'] = True
     session['strategy_data'] = {'api_id': active_api['_id']}
     
     await update.callback_query.answer()
     await update.callback_query.edit_message_text(
-        "🎯 <b>Create New Strategy</b>\n\n"
-        "Please provide a name for this strategy (e.g., 'BTC_Weekly_Conservative'):",
+        "📝 <b>Create New Strategy</b>\n\n"
+        "Please provide a name for this strategy (e.g., 'BTC Weekly Conservative'):",
         parse_mode=ParseMode.HTML,
         reply_markup=get_cancel_keyboard()
     )
