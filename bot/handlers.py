@@ -568,6 +568,10 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     data = query.data
     
+    # ✅ SKIP strangle callbacks - let ConversationHandler handle them
+    if data.startswith("strangle_"):
+        return  # Let strangle_conv_handler handle it
+    
     # Main menu
     if data == "main_menu":
         await query.edit_message_text(
