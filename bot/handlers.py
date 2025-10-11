@@ -1641,10 +1641,6 @@ async def trade_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     return SELECTING_API
 
-# bot/handlers.py - COMPLETE FIXED VERSION
-
-# bot/handlers.py - COMPLETE FIXED select_api_for_trade FUNCTION
-
 async def select_api_for_trade(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Select API for trade execution"""
     query = update.callback_query
@@ -1659,34 +1655,40 @@ async def select_api_for_trade(update: Update, context: ContextTypes.DEFAULT_TYP
     bot_logger.info(f"✅ Selecting API for trade: user={user_id}, api_id={api_id}")
     
     try:
-        # Get API details
-        api_data = await crud.get_api_credential_by_id(db, ObjectId(api_id))
-        
-        if not api_data:
-            await query.edit_message_text(
-                "❌ <b>API Not Found</b>\n\nThe selected API could not be found.",
-                parse_mode=ParseMode.HTML,
-                reply_markup=get_main_menu_keyboard()
-            )
-            return ConversationHandler.END
-        
         # Get strategies for this user
         strategies = await crud.get_user_strategies(db, user_id)
         
+        bot_logger.info(f"✅ Found {len(strategies)} strategy(ies)")
+        
         if not strategies:
             await query.edit_message_text(
-                "⚠️ <b>No Strategies Found</b>\n\n"
-                "Please create a trading strategy first.\n\n"
-                "Go to: 🎲 Strangle → 📝 Create Preset",
+                "⚠️ <b>No Strategies</b>\n\nPlease create a trading strategy first.",
                 parse_mode=ParseMode.HTML,
                 reply_markup=get_main_menu_keyboard()
             )
             return ConversationHandler.END
         
-        bot_logger.info(f"✅ Found {len(strategies)} strategy(ies) for user {user_id}")
+        # Get API details
+        api_data = await crud.get_api_credential_by_id(db, ObjectId(api_id))
         
-        # Show strategy selection
-        await query.edit_
+        await query.edit_message_text(
+            f"📊 <b>Execute Trade</b>\n\n"
+            f"<b>Selected API:</b> {api_data.get('nickname', 'Unnamed')}\n\n"
+            f"Select a strategy to execute:",
+            parse_mode=ParseMode.HTML,
+            reply_markup=get_trade_execution_keyboard(strategies)
+        )
+        
+        return SELECTING_STRATEGY
+        
+    except Exception as e:
+        bot_logger.error(f"❌ Error in select_api_for_trade: {e}", exc_info=True)
+        await query.edit_message_text(
+            f"❌ <b>Error</b>\n\n{str(e)}",
+            parse_mode=ParseMode.HTML,
+            reply_markup=get_main_menu_keyboard()
+        )
+        return ConversationHandler.END
 
 
 async def execute_trade_preview(update: Update, context: ContextTypes.DEFAULT_TYPE):
