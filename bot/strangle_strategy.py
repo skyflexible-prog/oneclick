@@ -587,7 +587,7 @@ async def start_strangle_execute(update: Update, context: ContextTypes.DEFAULT_T
     query = update.callback_query
     await query.answer()
     
-    user_id = query.from_user.id
+    user_id = str(query.from_user.id)
     db = Database.get_database()
     
     # Get user's strangle presets
