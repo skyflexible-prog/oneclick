@@ -402,3 +402,26 @@ async def get_api_by_id(db: AsyncIOMotorDatabase, api_id: str) -> Optional[Dict]
         bot_logger.error(f"Error getting API by ID: {e}")
         return None
         
+async def get_active_api(db: AsyncIOMotorDatabase, user_id: str) -> Optional[Dict]:
+    """
+    Get active API for user
+    Args:
+        db: Database instance
+        user_id: Telegram user ID as string
+    Returns:
+        Active API credential or None
+    """
+    try:
+        api = await db.api_credentials.find_one({
+            "user_id": user_id,  # ✅ Query with string
+            "is_active": True
+        })
+        
+        if api:
+            api["_id"] = str(api["_id"])
+            api["user_id"] = str(api["user_id"])
+        
+        return api
+    except Exception as e:
+        bot_logger.error(f"Error getting active API: {e}")
+        return None
