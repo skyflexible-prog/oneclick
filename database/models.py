@@ -1,7 +1,7 @@
 # database/models.py
 
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Dict, Optional
 from datetime import datetime
 from bson import ObjectId
 
@@ -135,4 +135,80 @@ class OrderModel(BaseModel):
     class Config:
         populate_by_name = True
         arbitrary_types_allowed = True
-        
+
+
+async def create_strangle_preset(
+    db,
+    user_id: int,
+    api_id: str,
+    preset_name: str,
+    direction: str,
+    strike_method: str,
+    strike_type: Optional[str],
+    strike_value: float,
+    sl_trigger_method: str,
+    sl_trigger_value: float,
+    sl_limit_method: str,
+    sl_limit_value: float,
+    asset: str = "BTC",
+    expiry_type: str = "daily",
+    lot_size: int = 1
+) -> str:
+    """
+    Create a strangle strategy preset
+    
+    Args:
+        direction: "long" or "short"
+        strike_method: "percentage" or "atm_offset"
+        strike_type: "otm" or "itm" (only for percentage method)
+        strike_value: Percentage (1-50) or offset (1-10)
+        sl_trigger_method: "percentage", "numerical", or "multiple"
+        sl_limit_method: "percentage", "numerical", or "multiple"
+    
+    Returns:
+        Preset ID
+    """
+    preset = {
+        "preset_name": preset_name,
+        "user_id": user_id,
+        "api_id": api_id,
+        "strategy_type": "strangle",
+        "direction": direction,
+        "strike_method": strike_method,
+        "strike_type": strike_type,
+        "strike_value": strike_value,
+        "sl_trigger_method": sl_trigger_method,
+        "sl_trigger_value": sl_trigger_value,
+        "sl_limit_method": sl_limit_method,
+        "sl_limit_value": sl_limit_value,
+        "asset": asset,
+        "expiry_type": expiry_type,
+        "lot_size": lot_size,
+        "created_at": datetime.utcnow(),
+        "is_active": True
+    }
+    
+    result = await db.strangle_presets.insert_one(preset)
+    return str(result.inserted_id)
+
+
+async def get_strangle_presets(db, user_id: int):
+    """Get all strangle presets for a user"""
+    presets = await db.strangle_presets.find({
+        "user_id": user_id,
+        "is_active": True
+    }).to_list(None)
+    return presets
+
+
+async def get_strangle_preset_by_id(db, preset_id: str):
+    """Get a specific strangle preset by ID"""
+    return await db.strangle_presets.find_one({"_id": ObjectId(preset_id)})
+
+
+async def delete_strangle_preset(db, preset_id: str):
+    """Delete a strangle preset"""
+    await db.strangle_presets.update_one(
+        {"_id": ObjectId(preset_id)},
+        {"$set": {"is_active": False}}
+    )
