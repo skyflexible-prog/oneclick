@@ -22,24 +22,45 @@ class NotificationService:
     ):
         """Send notification when an order is filled"""
         try:
-            # ✅ FIXED: Get fields from stored MongoDB document
-            symbol = order.get('symbol') or 'N/A'
-            side = (order.get('side') or 'N/A').upper()
+            # ✅ FIXED: Enhanced field extraction with multiple fallbacks
+            symbol = order.get('symbol')
+            if not symbol or symbol == 'N/A':
+                symbol = order.get('product_symbol', 'Unknown')
             
-            # Try multiple price fields
-            price = order.get('price')
-            if not price or price == 0:
-                price = order.get('stop_price')
-            if not price or price == 0:
-                price = order.get('limit_price')
+            side = order.get('side')
+            if not side or side == 'N/A':
+                side = 'Unknown'
+            side = side.upper()
+            
+            # Try multiple price fields with priority
+            price = None
+            for price_field in ['price', 'stop_price', 'limit_price', 'average_fill_price']:
+                price = order.get(price_field)
+                if price and float(price) > 0:
+                    break
+            
             price = float(price) if price else 0.0
             
-            size = int(order.get('size') or 0)
-            order_type = order.get('order_type') or 'N/A'
+            size = order.get('size')
+            size = int(size) if size else 0
             
-            # Enhanced logging
-            bot_logger.info(f"📊 Notification fields: symbol={symbol}, side={side}, price={price}, size={size}, order_type={order_type}")
+            order_type = order.get('order_type')
+            if not order_type:
+                order_type = order.get('stop_order_type', 'Unknown')
+            
+            # Enhanced logging for debugging
+            bot_logger.info(f"📊 Notification fields extracted:")
+            bot_logger.info(f"   Symbol: {symbol}")
+            bot_logger.info(f"   Side: {side}")
+            bot_logger.info(f"   Price: {price}")
+            bot_logger.info(f"   Size: {size}")
+            bot_logger.info(f"   Type: {order_type}")
             bot_logger.info(f"📋 Full order data: {order}")
+            
+            # Validate critical fields
+            if symbol == 'Unknown' or price == 0.0:
+                bot_logger.warning(f"⚠️ Missing critical data for notification. Order: {order}")
+                # Still send notification with available data
             
             # Determine emoji based on fill type
             emoji_map = {
@@ -90,6 +111,16 @@ class NotificationService:
             bot_logger.error(f"❌ Error sending order fill notification: {e}")
             import traceback
             bot_logger.error(traceback.format_exc())
+            
+            # Try to send a basic notification
+            try:
+                await self.bot.send_message(
+                    chat_id=user_id,
+                    text=f"🔔 Order Filled\n\nAn order was filled but details could not be retrieved.\nPlease check your positions.",
+                    parse_mode=ParseMode.HTML
+                )
+            except:
+                pass
 
 
 class OrderFillTracker:
@@ -128,10 +159,16 @@ class OrderFillTracker:
                 )
                 
                 if stored_order:
-                    # Log stored order details
-                    bot_logger.info(f"📋 Stored order details: {stored_order}")
+                    # Log stored order details BEFORE marking as filled
+                    bot_logger.info(f"📋 Stored order before marking filled:")
+                    bot_logger.info(f"   Order ID: {filled_id}")
+                    bot_logger.info(f"   Symbol: {stored_order.get('symbol')}")
+                    bot_logger.info(f"   Side: {stored_order.get('side')}")
+                    bot_logger.info(f"   Price: {stored_order.get('price')}")
+                    bot_logger.info(f"   Size: {stored_order.get('size')}")
+                    bot_logger.info(f"   Full data: {stored_order}")
                     
-                    # Mark as filled
+                    # Mark as filled in database
                     await db.order_states.update_one(
                         {'_id': stored_order['_id']},
                         {
@@ -142,6 +179,7 @@ class OrderFillTracker:
                         }
                     )
                     
+                    # Add to filled orders list (BEFORE any modifications)
                     filled_orders.append(stored_order)
                     bot_logger.info(f"✅ Marked order as filled: {filled_id} - {stored_order.get('symbol')}")
             
@@ -154,6 +192,12 @@ class OrderFillTracker:
                 
                 # Get price (try multiple fields)
                 price = order.get('stop_price') or order.get('limit_price') or order.get('average_fill_price')
+                
+                # Convert price to float if it's a string
+                try:
+                    price = float(price) if price else None
+                except (ValueError, TypeError):
+                    price = None
                 
                 order_data = {
                     'user_id': user_id,
@@ -197,15 +241,18 @@ class OrderFillTracker:
         order_type = order.get('order_type', '')
         reduce_only = order.get('reduce_only', False)
         
-        bot_logger.info(f"🔍 Determining fill type: order_type={order_type}, reduce_only={reduce_only}")
+        bot_logger.info(f"🔍 Determining fill type:")
+        bot_logger.info(f"   order_type: {order_type}")
+        bot_logger.info(f"   reduce_only: {reduce_only}")
         
         if reduce_only:
-            if 'stop_loss' in order_type.lower():
+            if 'stop_loss' in str(order_type).lower():
                 return "STOP_LOSS"
-            elif 'take_profit' in order_type.lower():
+            elif 'take_profit' in str(order_type).lower():
                 return "TAKE_PROFIT"
             else:
+                # Default to stop-loss if reduce_only but type unclear
                 return "STOP_LOSS"
         else:
             return "ENTRY"
-            
+                
