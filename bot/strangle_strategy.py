@@ -978,7 +978,7 @@ async def cancel_strangle(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ==================== CONVERSATION HANDLER ====================
 strangle_conv_handler = ConversationHandler(
     entry_points=[
-        CallbackQueryHandler(strangle_menu, pattern="^strangle_menu$"),
+        #CallbackQueryHandler(strangle_menu, pattern="^strangle_menu$"),
         CallbackQueryHandler(start_strangle_create, pattern="^strangle_create$"),
         CallbackQueryHandler(start_strangle_execute, pattern="^strangle_execute$"),
         CallbackQueryHandler(manage_strangle_presets, pattern="^strangle_manage$")
