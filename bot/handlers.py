@@ -718,15 +718,13 @@ async def delete_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ==================== CALLBACK QUERY HANDLERS ====================
 
-# bot/handlers.py - FIX THE button_callback FUNCTION
-
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle all button callbacks"""
     query = update.callback_query
     await query.answer()
     
     data = query.data
-    bot_logger.info(f"🔘 Button callback: {data}")  # DEBUG LOG
+    bot_logger.info(f"🔘 Button callback: {data}")
     
     # Main menu
     if data == "main_menu":
@@ -737,7 +735,131 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     
-    # ✅ STRANGLE MENU
+    # Balance
+    elif data == "balance":
+        db = Database.get_database()
+        user_id = str(query.from_user.id)  # ✅ FIX
+        
+        api = await crud.get_active_api(db, user_id)
+        
+        if not api:
+            await query.edit_message_text(
+                "⚠️ <b>No Active API</b>\n\n"
+                "Please add and activate an API first.\n\n"
+                "Go to: 🔑 API Keys → ➕ Add API",
+                parse_mode=ParseMode.HTML,
+                reply_markup=get_main_menu_keyboard()
+            )
+            return
+        
+        await query.edit_message_text(
+            "💰 <b>Balance</b>\n\nFetching balance...",
+            parse_mode=ParseMode.HTML
+        )
+        # TODO: Implement actual balance fetching
+        return
+    
+    # Positions
+    elif data == "positions":
+        db = Database.get_database()
+        user_id = str(query.from_user.id)  # ✅ FIX
+        
+        api = await crud.get_active_api(db, user_id)
+        
+        if not api:
+            await query.edit_message_text(
+                "⚠️ <b>No Active API</b>\n\n"
+                "Please add and activate an API first.\n\n"
+                "Go to: 🔑 API Keys → ➕ Add API",
+                parse_mode=ParseMode.HTML,
+                reply_markup=get_main_menu_keyboard()
+            )
+            return
+        
+        await query.edit_message_text(
+            "📊 <b>Positions</b>\n\nFetching positions...",
+            parse_mode=ParseMode.HTML
+        )
+        # TODO: Implement actual positions fetching
+        return
+    
+    # Orders
+    elif data == "orders":
+        db = Database.get_database()
+        user_id = str(query.from_user.id)  # ✅ FIX
+        
+        api = await crud.get_active_api(db, user_id)
+        
+        if not api:
+            await query.edit_message_text(
+                "⚠️ <b>No Active API</b>\n\n"
+                "Please add and activate an API first.\n\n"
+                "Go to: 🔑 API Keys → ➕ Add API",
+                parse_mode=ParseMode.HTML,
+                reply_markup=get_main_menu_keyboard()
+            )
+            return
+        
+        await query.edit_message_text(
+            "📋 <b>Orders</b>\n\nFetching orders...",
+            parse_mode=ParseMode.HTML
+        )
+        # TODO: Implement actual orders fetching
+        return
+    
+    # History
+    elif data == "history":
+        db = Database.get_database()
+        user_id = str(query.from_user.id)  # ✅ FIX
+        
+        trades = await crud.get_user_trades(db, user_id, status="closed")
+        
+        if not trades:
+            await query.edit_message_text(
+                "📜 <b>Trade History</b>\n\nNo closed trades yet.",
+                parse_mode=ParseMode.HTML,
+                reply_markup=get_main_menu_keyboard()
+            )
+            return
+        
+        message = "📜 <b>Trade History</b>\n\n"
+        message += f"Found {len(trades)} closed trade(s)."
+        
+        await query.edit_message_text(
+            message,
+            parse_mode=ParseMode.HTML,
+            reply_markup=get_main_menu_keyboard()
+        )
+        return
+    
+    # Strategies
+    elif data == "strategies":
+        db = Database.get_database()
+        user_id = str(query.from_user.id)  # ✅ FIX
+        
+        strategies = await crud.get_user_strategies(db, user_id)
+        
+        if not strategies:
+            await query.edit_message_text(
+                "⚠️ <b>No Strategies Found</b>\n\n"
+                "Create a strategy first.\n\n"
+                "Go to: 🎲 Strangle → 📝 Create Preset",
+                parse_mode=ParseMode.HTML,
+                reply_markup=get_main_menu_keyboard()
+            )
+            return
+        
+        message = "⚙️ <b>Your Strategies</b>\n\n"
+        message += f"Found {len(strategies)} strategy(ies)."
+        
+        await query.edit_message_text(
+            message,
+            parse_mode=ParseMode.HTML,
+            reply_markup=get_main_menu_keyboard()
+        )
+        return
+    
+    # Strangle menu
     elif data == "strangle_menu":
         bot_logger.info("🎲 Showing Strangle menu")
         
@@ -766,10 +888,24 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     
-    # ✅ SKIP strangle action callbacks - DON'T HANDLE THEM HERE
-    #elif data in ["strangle_create", "strangle_execute", "strangle_manage"]:
-        # Let ConversationHandler process these
-        #return  # ✅ ADD RETURN HERE - DON'T CONTINUE TO FALLBACK
+    # API menu
+    elif data == "api_menu":
+        await query.edit_message_text(
+            "🔑 <b>API Management</b>\n\nManage your Delta Exchange API keys:",
+            parse_mode=ParseMode.HTML,
+            reply_markup=get_api_management_keyboard()
+        )
+        return
+    
+    # List APIs
+    elif data == "list_apis":
+        await list_apis(update, context)  # Already fixed ✅
+        return
+    
+    # Add API
+    elif data == "add_api":
+        await add_api(update, context)  # Already fixed ✅
+        return
     
     # Help
     elif data == "help":
@@ -809,8 +945,11 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     
-    # ✅ FALLBACK - Only reached if no match above
-    if not data.startswith("strangle_"):
+    # ✅ Skip strangle action callbacks - Let ConversationHandler handle them
+    # Don't add any handling for strangle_create, strangle_execute, strangle_manage
+    
+    # ✅ Fallback - Only if no match above
+    if not data.startswith("strangle_") and not data.startswith("activate_api_") and not data.startswith("delete_api_"):
         await query.edit_message_text(
             "Please select an option:",
             reply_markup=get_main_menu_keyboard()
