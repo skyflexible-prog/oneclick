@@ -141,7 +141,7 @@ async def create_api_credential(
 ) -> str:
     """Create new API credential"""
     credential_data = {
-        "user_id": ObjectId(user_id),
+        "user_id": user_id,  # ✅ FIXED - store as string
         "nickname": nickname,
         "api_key_encrypted": api_key_encrypted,
         "api_secret_encrypted": api_secret_encrypted,
@@ -155,10 +155,9 @@ async def create_api_credential(
 async def get_user_api_credentials(db: AsyncIOMotorDatabase, user_id: str) -> List[Dict]:
     """Get all API credentials for a user"""
     credentials = []
-    cursor = db.api_credentials.find({"user_id": ObjectId(user_id)})
+    cursor = db.api_credentials.find({"user_id": user_id})  # ✅ FIXED
     async for credential in cursor:
         credential["_id"] = str(credential["_id"])
-        credential["user_id"] = str(credential["user_id"])
         credentials.append(credential)
     return credentials
 
@@ -174,17 +173,14 @@ async def get_api_credential_by_id(db: AsyncIOMotorDatabase, api_id: str) -> Opt
 
 async def set_active_api(db: AsyncIOMotorDatabase, user_id: str, api_id: str):
     """Set specific API as active and deactivate others"""
-    # Deactivate all APIs for user
     await db.api_credentials.update_many(
-        {"user_id": ObjectId(user_id)},
+        {"user_id": user_id},  # ✅ FIXED
         {"$set": {"is_active": False}}
     )
-    # Activate selected API
     await db.api_credentials.update_one(
         {"_id": ObjectId(api_id)},
         {"$set": {"is_active": True}}
     )
-
 
 async def delete_api_credential(db: AsyncIOMotorDatabase, api_id: str):
     """Delete API credential"""
@@ -195,8 +191,8 @@ async def delete_api_credential(db: AsyncIOMotorDatabase, api_id: str):
 
 async def create_strategy(db: AsyncIOMotorDatabase, strategy_data: Dict) -> str:
     """Create new trading strategy"""
-    strategy_data["user_id"] = ObjectId(strategy_data["user_id"])
-    strategy_data["api_id"] = ObjectId(strategy_data["api_id"])
+    strategy_data["user_id"] = strategy_data["user_id"]  # ✅ FIXED - keep as string
+    strategy_data["api_id"] = ObjectId(strategy_data["api_id"])  # API _id is still ObjectId
     strategy_data["created_at"] = datetime.utcnow()
     strategy_data["updated_at"] = datetime.utcnow()
     
@@ -207,14 +203,12 @@ async def create_strategy(db: AsyncIOMotorDatabase, strategy_data: Dict) -> str:
 async def get_user_strategies(db: AsyncIOMotorDatabase, user_id: str) -> List[Dict]:
     """Get all strategies for a user"""
     strategies = []
-    cursor = db.strategies.find({"user_id": ObjectId(user_id)})
+    cursor = db.strategies.find({"user_id": user_id})  # ✅ FIXED
     async for strategy in cursor:
         strategy["_id"] = str(strategy["_id"])
-        strategy["user_id"] = str(strategy["user_id"])
         strategy["api_id"] = str(strategy["api_id"])
         strategies.append(strategy)
     return strategies
-
 
 async def get_strategy_by_id(db: AsyncIOMotorDatabase, strategy_id: str) -> Optional[Dict]:
     """Get strategy by ID"""
@@ -244,7 +238,7 @@ async def delete_strategy(db: AsyncIOMotorDatabase, strategy_id: str):
 
 async def create_trade(db: AsyncIOMotorDatabase, trade_data: Dict) -> str:
     """Create new trade"""
-    trade_data["user_id"] = ObjectId(trade_data["user_id"])
+    trade_data["user_id"] = trade_data["user_id"]  # ✅ FIXED - keep as string
     trade_data["api_id"] = ObjectId(trade_data["api_id"])
     trade_data["strategy_id"] = ObjectId(trade_data["strategy_id"])
     trade_data["entry_time"] = datetime.utcnow()
@@ -257,7 +251,7 @@ async def create_trade(db: AsyncIOMotorDatabase, trade_data: Dict) -> str:
 
 async def get_user_trades(db: AsyncIOMotorDatabase, user_id: str, status: str = None) -> List[Dict]:
     """Get all trades for a user"""
-    query = {"user_id": ObjectId(user_id)}
+    query = {"user_id": user_id}  # ✅ FIXED
     if status:
         query["status"] = status
     
@@ -265,7 +259,6 @@ async def get_user_trades(db: AsyncIOMotorDatabase, user_id: str, status: str = 
     cursor = db.trades.find(query).sort("entry_time", -1)
     async for trade in cursor:
         trade["_id"] = str(trade["_id"])
-        trade["user_id"] = str(trade["user_id"])
         trade["api_id"] = str(trade["api_id"])
         trade["strategy_id"] = str(trade["strategy_id"])
         trades.append(trade)
