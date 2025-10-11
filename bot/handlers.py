@@ -418,18 +418,22 @@ async def receive_api_secret(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return AWAITING_API_SECRET
     
     # Test API credentials
-    await context.bot.send_message(
+    test_msg = await context.bot.send_message(
         chat_id=user.id,
         text="🔄 Testing API credentials..."
     )
     
     try:
+        bot_logger.info(f"🔍 Starting API validation for user {user.id}")
+        
         async with DeltaExchangeAPI(session['api_key'], api_secret) as api:
             test_result = await api.get_wallet_balance()
         
         if 'error' in test_result:
-            await context.bot.send_message(
+            bot_logger.error(f"❌ API validation failed: {test_result.get('error')}")
+            await context.bot.edit_message_text(
                 chat_id=user.id,
+                message_id=test_msg.message_id,
                 text=f"❌ API test failed: {test_result.get('error')}\n\n"
                      "Please check your credentials and try again.",
                 reply_markup=get_api_management_keyboard()
@@ -438,9 +442,10 @@ async def receive_api_secret(update: Update, context: ContextTypes.DEFAULT_TYPE)
             return ConversationHandler.END
     
     except Exception as e:
-        bot_logger.error(f"❌ API validation error: {e}")
-        await context.bot.send_message(
+        bot_logger.error(f"❌ API validation exception: {type(e).__name__}: {e}")
+        await context.bot.edit_message_text(
             chat_id=user.id,
+            message_id=test_msg.message_id,
             text=f"❌ API validation failed: {str(e)}\n\n"
                  "Please check your credentials and try again.",
             reply_markup=get_api_management_keyboard()
@@ -448,39 +453,85 @@ async def receive_api_secret(update: Update, context: ContextTypes.DEFAULT_TYPE)
         clear_user_session(user.id)
         return ConversationHandler.END
     
-    # ✅ FIX: Use Telegram user ID as string, not MongoDB _id
+    # ✅ FIX: Use Telegram user ID as string
     db = Database.get_database()
-    user_id = str(user.id)  # ← Convert Telegram ID to string
+    user_id = str(user.id)
     
-    # Encrypt credentials
-    encrypted_key = encryptor.encrypt(session['api_key'])
-    encrypted_secret = encryptor.encrypt(api_secret)
+    bot_logger.info(f"✅ API validation successful for user {user_id}")
+    bot_logger.info(f"   Balance result: {test_result}")
+    bot_logger.info(f"   Session data: nickname={session.get('api_nickname')}")
     
-    # ✅ FIX: Pass user_id (Telegram ID string) instead of user_data['_id']
-    api_id = await crud.create_api_credential(
-        db,
-        user_id,  # ← Pass Telegram ID as string
-        session['api_nickname'],
-        encrypted_key,
-        encrypted_secret
-    )
-    
-    # ✅ FIX: Use user_id for querying too
-    apis = await crud.get_user_api_credentials(db, user_id)
-    
-    # Set as active if first API
-    if len(apis) == 1:
-        await crud.set_active_api(db, user_id, api_id)
-    
-    await context.bot.send_message(
-        chat_id=user.id,
-        text=f"✅ <b>API credentials saved successfully!</b>\n\n"
-             f"<b>Nickname:</b> {session['api_nickname']}\n"
-             f"<b>Status:</b> Active\n\n"
-             "You can now create trading strategies.",
-        parse_mode=ParseMode.HTML,
-        reply_markup=get_main_menu_keyboard()
-    )
+    try:
+        # Encrypt credentials
+        bot_logger.info(f"🔐 Encrypting credentials...")
+        encrypted_key = encryptor.encrypt(session['api_key'])
+        encrypted_secret = encryptor.encrypt(api_secret)
+        bot_logger.info(f"✅ Credentials encrypted")
+        
+        # Save to database
+        bot_logger.info(f"💾 Saving to database...")
+        bot_logger.info(f"   user_id: {user_id} (type: {type(user_id).__name__})")
+        bot_logger.info(f"   nickname: {session['api_nickname']}")
+        
+        api_id = await crud.create_api_credential(
+            db,
+            user_id,
+            session['api_nickname'],
+            encrypted_key,
+            encrypted_secret
+        )
+        
+        bot_logger.info(f"✅ API saved to database!")
+        bot_logger.info(f"   API ID: {api_id}")
+        
+        # Verify save by querying back
+        bot_logger.info(f"🔍 Verifying save by querying database...")
+        apis = await crud.get_user_api_credentials(db, user_id)
+        bot_logger.info(f"✅ Found {len(apis)} API(s) for user {user_id}")
+        
+        for i, api in enumerate(apis):
+            bot_logger.info(f"   API {i+1}: id={api.get('_id')}, nickname={api.get('nickname')}")
+        
+        # Set as active if first API
+        if len(apis) == 1:
+            bot_logger.info(f"🎯 Setting as active API (first API)...")
+            await crud.set_active_api(db, user_id, api_id)
+            bot_logger.info(f"✅ API set as active")
+        
+        await context.bot.edit_message_text(
+            chat_id=user.id,
+            message_id=test_msg.message_id,
+            text=f"✅ <b>API Credentials Saved Successfully!</b>\n\n"
+                 f"<b>Nickname:</b> {session['api_nickname']}\n"
+                 f"<b>Status:</b> {'Active' if len(apis) == 1 else 'Inactive'}\n"
+                 f"<b>Total APIs:</b> {len(apis)}\n\n"
+                 "You can now create trading strategies and Strangle presets.",
+            parse_mode=ParseMode.HTML,
+            reply_markup=get_main_menu_keyboard()
+        )
+        
+        bot_logger.info(f"🎉 API save process completed successfully!")
+        
+    except Exception as e:
+        bot_logger.error(f"❌ DATABASE SAVE ERROR!")
+        bot_logger.error(f"   Error type: {type(e).__name__}")
+        bot_logger.error(f"   Error message: {str(e)}")
+        bot_logger.error(f"   user_id: {user_id} (type: {type(user_id).__name__})")
+        bot_logger.error(f"   nickname: {session.get('api_nickname')}")
+        
+        import traceback
+        bot_logger.error(f"   Traceback: {traceback.format_exc()}")
+        
+        await context.bot.edit_message_text(
+            chat_id=user.id,
+            message_id=test_msg.message_id,
+            text=f"⚠️ <b>API Validated But Save Failed</b>\n\n"
+                 f"Your API credentials are valid, but couldn't be saved.\n\n"
+                 f"Error: {str(e)}\n\n"
+                 "Please try again or contact support.",
+            parse_mode=ParseMode.HTML,
+            reply_markup=get_api_management_keyboard()
+        )
     
     clear_user_session(user.id)
     return ConversationHandler.END
