@@ -190,6 +190,9 @@ def register_handlers():
         allow_reentry=True
     )
     ptb.add_handler(strategy_conv_handler)
+
+    ptb.add_handler(strangle_conv_handler)
+    bot_logger.info("✅ Strangle handler registered")
     
     # Trade Conversation Handler
     trade_conv_handler = ConversationHandler(
@@ -267,7 +270,12 @@ def register_handlers():
     
     ptb.add_error_handler(error_handler)
     
-    bot_logger.info("All handlers registered successfully")
+    bot_logger.info("✅ All handlers registered successfully")
+    bot_logger.info("   - API handler")
+    bot_logger.info("   - Strategy handler")
+    bot_logger.info("   - Strangle handler ✨")  # ✅ ADD THIS LOG
+    bot_logger.info("   - Trade handler")
+    bot_logger.info("   - Order management handler")
 
 
 @app.post("/webhook")
