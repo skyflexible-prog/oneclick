@@ -578,3 +578,467 @@ async def confirm_strangle_preset(update: Update, context: ContextTypes.DEFAULT_
         )
         return ConversationHandler.END
         
+
+# bot/strangle_strategy.py - PART 3: EXECUTE PRESET
+
+# ==================== EXECUTE PRESET FLOW ====================
+async def start_strangle_execute(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Start executing a strangle preset - List presets"""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = query.from_user.id
+    db = Database.get_database()
+    
+    # Get user's strangle presets
+    presets = await get_strangle_presets(db, user_id)
+    
+    if not presets:
+        await query.edit_message_text(
+            "❌ <b>No Presets Found</b>\n\n"
+            "Please create a preset first using 'Create Preset'.",
+            parse_mode=ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("🔙 Back", callback_data="strangle_menu")
+            ]])
+        )
+        return ConversationHandler.END
+    
+    # Build preset selection keyboard
+    keyboard = []
+    for preset in presets:
+        # Format preset display
+        direction = preset['direction'].capitalize()
+        
+        if preset['strike_method'] == 'percentage':
+            strike_info = f"{preset['strike_value']}% {preset.get('strike_type', 'OTM').upper()}"
+        else:
+            strike_info = f"ATM±{int(preset['strike_value'])}"
+        
+        button_text = f"{'📈' if direction == 'Long' else '📉'} {preset['preset_name']}"
+        
+        keyboard.append([
+            InlineKeyboardButton(
+                button_text,
+                callback_data=f"exec_strangle_{preset['_id']}"
+            )
+        ])
+    
+    keyboard.append([InlineKeyboardButton("🔙 Back", callback_data="strangle_menu")])
+    
+    await query.edit_message_text(
+        "<b>▶️ Execute Strangle Preset</b>\n\n"
+        "Select a preset to execute:",
+        parse_mode=ParseMode.HTML,
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+    
+    return EXECUTING_STRANGLE
+
+
+async def execute_strangle_preset(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Execute selected strangle preset"""
+    query = update.callback_query
+    await query.answer("⏳ Executing preset...")
+    
+    preset_id = query.data.split('_')[-1]
+    user_id = query.from_user.id
+    db = Database.get_database()
+    
+    try:
+        # Get preset details
+        preset = await get_strangle_preset_by_id(db, preset_id)
+        
+        if not preset:
+            await query.edit_message_text(
+                "❌ <b>Error</b>\n\nPreset not found.",
+                parse_mode=ParseMode.HTML,
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("🔙 Back", callback_data="strangle_execute")
+                ]])
+            )
+            return ConversationHandler.END
+        
+        # Get API credentials
+        api = await crud.get_api_by_id(db, preset['api_id'])
+        
+        if not api:
+            await query.edit_message_text(
+                "❌ <b>Error</b>\n\nAPI credentials not found.",
+                parse_mode=ParseMode.HTML,
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("🔙 Back", callback_data="strangle_execute")
+                ]])
+            )
+            return ConversationHandler.END
+        
+        # Decrypt API keys
+        api_key = encryptor.decrypt(api['api_key_encrypted'])
+        api_secret = encryptor.decrypt(api['api_secret_encrypted'])
+        
+        # Show executing message
+        await query.edit_message_text(
+            f"⏳ <b>Executing Strangle</b>\n\n"
+            f"<b>Preset:</b> {preset['preset_name']}\n"
+            f"<b>Direction:</b> {preset['direction'].capitalize()}\n\n"
+            f"Please wait...",
+            parse_mode=ParseMode.HTML
+        )
+        
+        # Execute strangle
+        result = await StrangleExecutor.execute_strangle(
+            api_key=api_key,
+            api_secret=api_secret,
+            preset=preset
+        )
+        
+        if result['success']:
+            # Build success message
+            message = (
+                f"✅ <b>Strangle Executed!</b>\n\n"
+                f"<b>Preset:</b> {preset['preset_name']}\n"
+                f"<b>Direction:</b> {preset['direction'].capitalize()}\n\n"
+                f"<b>Call:</b>\n"
+                f"• Symbol: {result['call_symbol']}\n"
+                f"• Premium: ${result['call_premium']:.2f}\n"
+                f"• Order ID: {result['call_order_id']}\n\n"
+                f"<b>Put:</b>\n"
+                f"• Symbol: {result['put_symbol']}\n"
+                f"• Premium: ${result['put_premium']:.2f}\n"
+                f"• Order ID: {result['put_order_id']}\n\n"
+                f"<b>Total Cost:</b> ${result['total_premium']:.2f}\n\n"
+                f"<b>Stop-Loss:</b>\n"
+                f"• Trigger: ${result['sl_trigger']:.2f}\n"
+                f"• Limit: ${result['sl_limit']:.2f}\n"
+                f"• Call SL ID: {result['call_sl_order_id']}\n"
+                f"• Put SL ID: {result['put_sl_order_id']}"
+            )
+            
+            await query.edit_message_text(
+                message,
+                parse_mode=ParseMode.HTML,
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("🔙 Back to Menu", callback_data="strangle_menu")
+                ]])
+            )
+            
+            bot_logger.info(f"Strangle executed successfully for user {user_id}")
+        
+        else:
+            # Execution failed
+            await query.edit_message_text(
+                f"❌ <b>Execution Failed</b>\n\n"
+                f"<b>Error:</b> {result['error']}\n\n"
+                f"Please check your API credentials and try again.",
+                parse_mode=ParseMode.HTML,
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("🔙 Back", callback_data="strangle_execute")
+                ]])
+            )
+            
+            bot_logger.error(f"Strangle execution failed: {result['error']}")
+        
+        return ConversationHandler.END
+    
+    except Exception as e:
+        bot_logger.error(f"Error executing strangle: {e}")
+        import traceback
+        bot_logger.error(traceback.format_exc())
+        
+        await query.edit_message_text(
+            f"❌ <b>Unexpected Error</b>\n\n"
+            f"{str(e)}",
+            parse_mode=ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("🔙 Back", callback_data="strangle_execute")
+            ]])
+        )
+        
+        return ConversationHandler.END
+
+
+# ==================== MANAGE PRESETS FLOW ====================
+async def manage_strangle_presets(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Manage strangle presets - List all presets"""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = query.from_user.id
+    db = Database.get_database()
+    
+    # Get user's strangle presets
+    presets = await get_strangle_presets(db, user_id)
+    
+    if not presets:
+        await query.edit_message_text(
+            "❌ <b>No Presets Found</b>\n\n"
+            "You don't have any strangle presets yet.\n"
+            "Create one using 'Create Preset'.",
+            parse_mode=ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("🔙 Back", callback_data="strangle_menu")
+            ]])
+        )
+        return ConversationHandler.END
+    
+    # Build preset list message
+    message = "<b>📋 Your Strangle Presets</b>\n\n"
+    
+    keyboard = []
+    for i, preset in enumerate(presets, 1):
+        direction = preset['direction'].capitalize()
+        
+        if preset['strike_method'] == 'percentage':
+            strike_info = f"{preset['strike_value']}% {preset.get('strike_type', 'OTM').upper()}"
+        else:
+            strike_info = f"ATM±{int(preset['strike_value'])}"
+        
+        # Add to message
+        message += (
+            f"<b>{i}. {preset['preset_name']}</b>\n"
+            f"   Direction: {direction}\n"
+            f"   Strike: {strike_info}\n"
+            f"   SL: {preset['sl_trigger_value']} ({preset['sl_trigger_method']})\n\n"
+        )
+        
+        # Add button
+        button_text = f"{'📈' if direction == 'Long' else '📉'} {preset['preset_name']}"
+        keyboard.append([
+            InlineKeyboardButton(
+                button_text,
+                callback_data=f"view_strangle_{preset['_id']}"
+            )
+        ])
+    
+    keyboard.append([InlineKeyboardButton("🔙 Back", callback_data="strangle_menu")])
+    
+    await query.edit_message_text(
+        message,
+        parse_mode=ParseMode.HTML,
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+    
+    return MANAGING_STRANGLE_PRESETS
+
+
+async def view_strangle_preset(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """View details of a specific preset"""
+    query = update.callback_query
+    await query.answer()
+    
+    preset_id = query.data.split('_')[-1]
+    db = Database.get_database()
+    
+    try:
+        # Get preset details
+        preset = await get_strangle_preset_by_id(db, preset_id)
+        
+        if not preset:
+            await query.edit_message_text(
+                "❌ Preset not found.",
+                parse_mode=ParseMode.HTML,
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("🔙 Back", callback_data="strangle_manage")
+                ]])
+            )
+            return MANAGING_STRANGLE_PRESETS
+        
+        # Get API name
+        api = await crud.get_api_by_id(db, preset['api_id'])
+        api_name = api.get('nickname', 'Unknown') if api else 'Unknown'
+        
+        # Format preset details
+        direction = preset['direction'].capitalize()
+        
+        if preset['strike_method'] == 'percentage':
+            strike_display = f"{preset['strike_value']}% {preset.get('strike_type', 'OTM').upper()}"
+        else:
+            strike_display = f"ATM±{int(preset['strike_value'])}"
+        
+        # Format SL
+        sl_trigger = preset['sl_trigger_value']
+        sl_limit = preset['sl_limit_value']
+        
+        if preset['sl_trigger_method'] == 'percentage':
+            sl_trigger_display = f"{sl_trigger}%"
+        elif preset['sl_trigger_method'] == 'numerical':
+            sl_trigger_display = f"${sl_trigger}"
+        else:
+            sl_trigger_display = f"{sl_trigger}x"
+        
+        if preset['sl_limit_method'] == 'percentage':
+            sl_limit_display = f"{sl_limit}%"
+        elif preset['sl_limit_method'] == 'numerical':
+            sl_limit_display = f"${sl_limit}"
+        else:
+            sl_limit_display = f"{sl_limit}x"
+        
+        message = (
+            f"<b>📊 {preset['preset_name']}</b>\n\n"
+            f"<b>Configuration:</b>\n"
+            f"• Direction: {direction} Strangle\n"
+            f"• Asset: {preset['asset']}\n"
+            f"• Expiry: {preset['expiry_type'].capitalize()}\n"
+            f"• API: {api_name}\n\n"
+            f"<b>Strike Selection:</b>\n"
+            f"• Method: {preset['strike_method'].replace('_', ' ').title()}\n"
+            f"• Value: {strike_display}\n\n"
+            f"<b>Stop-Loss:</b>\n"
+            f"• Trigger: {sl_trigger_display} ({preset['sl_trigger_method']})\n"
+            f"• Limit: {sl_limit_display} ({preset['sl_limit_method']})\n\n"
+            f"<b>Created:</b> {preset['created_at'].strftime('%Y-%m-%d %H:%M UTC')}"
+        )
+        
+        keyboard = [
+            [InlineKeyboardButton("▶️ Execute", callback_data=f"exec_strangle_{preset_id}")],
+            [InlineKeyboardButton("🗑️ Delete", callback_data=f"delete_strangle_{preset_id}")],
+            [InlineKeyboardButton("🔙 Back", callback_data="strangle_manage")]
+        ]
+        
+        await query.edit_message_text(
+            message,
+            parse_mode=ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+        
+        return MANAGING_STRANGLE_PRESETS
+    
+    except Exception as e:
+        bot_logger.error(f"Error viewing preset: {e}")
+        await query.edit_message_text(
+            f"❌ Error loading preset: {str(e)}",
+            parse_mode=ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("🔙 Back", callback_data="strangle_manage")
+            ]])
+        )
+        return MANAGING_STRANGLE_PRESETS
+
+
+async def delete_strangle_preset(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Delete a strangle preset"""
+    query = update.callback_query
+    
+    preset_id = query.data.split('_')[-1]
+    db = Database.get_database()
+    
+    try:
+        # Get preset name before deleting
+        preset = await get_strangle_preset_by_id(db, preset_id)
+        preset_name = preset.get('preset_name', 'Unknown') if preset else 'Unknown'
+        
+        # Delete preset
+        await delete_strangle_preset(db, preset_id)
+        
+        await query.answer("✅ Preset deleted")
+        
+        await query.edit_message_text(
+            f"✅ <b>Preset Deleted</b>\n\n"
+            f"<b>{preset_name}</b> has been deleted.",
+            parse_mode=ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("🔙 Back to Presets", callback_data="strangle_manage")
+            ]])
+        )
+        
+        return MANAGING_STRANGLE_PRESETS
+    
+    except Exception as e:
+        bot_logger.error(f"Error deleting preset: {e}")
+        await query.answer("❌ Delete failed", show_alert=True)
+        return MANAGING_STRANGLE_PRESETS
+
+
+# ==================== CANCEL HANDLER ====================
+async def cancel_strangle(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Cancel strangle conversation"""
+    if update.callback_query:
+        query = update.callback_query
+        await query.answer()
+        await query.edit_message_text(
+            "❌ Operation cancelled.",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("🔙 Back to Menu", callback_data="main_menu")
+            ]])
+        )
+    else:
+        await update.message.reply_text(
+            "❌ Operation cancelled.",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("🔙 Back to Menu", callback_data="main_menu")
+            ]])
+        )
+    
+    context.user_data.clear()
+    return ConversationHandler.END
+
+
+# bot/strangle_strategy.py - PART 4: CONVERSATION HANDLER SETUP
+
+# ==================== CONVERSATION HANDLER ====================
+strangle_conv_handler = ConversationHandler(
+    entry_points=[
+        CallbackQueryHandler(strangle_menu, pattern="^strangle_menu$"),
+        CallbackQueryHandler(start_strangle_create, pattern="^strangle_create$"),
+        CallbackQueryHandler(start_strangle_execute, pattern="^strangle_execute$"),
+        CallbackQueryHandler(manage_strangle_presets, pattern="^strangle_manage$")
+    ],
+    states={
+        SELECTING_STRANGLE_API: [
+            CallbackQueryHandler(select_strangle_api, pattern="^strangle_api_"),
+            CallbackQueryHandler(strangle_menu, pattern="^strangle_menu$")
+        ],
+        SELECTING_STRANGLE_DIRECTION: [
+            CallbackQueryHandler(select_strangle_direction, pattern="^strangle_dir_"),
+            CallbackQueryHandler(start_strangle_create, pattern="^strangle_create$")
+        ],
+        SELECTING_STRIKE_METHOD: [
+            CallbackQueryHandler(select_strike_method, pattern="^strike_method_"),
+            CallbackQueryHandler(start_strangle_create, pattern="^strangle_create$")
+        ],
+        SELECTING_STRIKE_TYPE: [
+            CallbackQueryHandler(select_strike_type, pattern="^strike_type_"),
+            CallbackQueryHandler(start_strangle_create, pattern="^strangle_create$")
+        ],
+        ENTERING_STRIKE_VALUE: [
+            MessageHandler(filters.TEXT & ~filters.COMMAND, enter_strike_value)
+        ],
+        SELECTING_SL_TRIGGER_METHOD: [
+            CallbackQueryHandler(select_sl_trigger_method, pattern="^sl_trigger_")
+        ],
+        ENTERING_SL_TRIGGER: [
+            MessageHandler(filters.TEXT & ~filters.COMMAND, enter_sl_trigger)
+        ],
+        SELECTING_SL_LIMIT_METHOD: [
+            CallbackQueryHandler(select_sl_limit_method, pattern="^sl_limit_")
+        ],
+        ENTERING_SL_LIMIT: [
+            MessageHandler(filters.TEXT & ~filters.COMMAND, enter_sl_limit)
+        ],
+        ENTERING_PRESET_NAME: [
+            MessageHandler(filters.TEXT & ~filters.COMMAND, enter_preset_name)
+        ],
+        REVIEWING_STRANGLE: [
+            CallbackQueryHandler(confirm_strangle_preset, pattern="^strangle_confirm$"),
+            CallbackQueryHandler(strangle_menu, pattern="^strangle_menu$")
+        ],
+        EXECUTING_STRANGLE: [
+            CallbackQueryHandler(execute_strangle_preset, pattern="^exec_strangle_"),
+            CallbackQueryHandler(start_strangle_execute, pattern="^strangle_execute$"),
+            CallbackQueryHandler(strangle_menu, pattern="^strangle_menu$")
+        ],
+        MANAGING_STRANGLE_PRESETS: [
+            CallbackQueryHandler(view_strangle_preset, pattern="^view_strangle_"),
+            CallbackQueryHandler(execute_strangle_preset, pattern="^exec_strangle_"),
+            CallbackQueryHandler(delete_strangle_preset, pattern="^delete_strangle_"),
+            CallbackQueryHandler(manage_strangle_presets, pattern="^strangle_manage$"),
+            CallbackQueryHandler(strangle_menu, pattern="^strangle_menu$")
+        ]
+    },
+    fallbacks=[
+        CallbackQueryHandler(cancel_strangle, pattern="^cancel$"),
+        CommandHandler("cancel", cancel_strangle)
+    ],
+    name="strangle_conversation",
+    persistent=False
+)
