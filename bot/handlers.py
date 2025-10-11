@@ -396,6 +396,8 @@ async def receive_api_key(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return AWAITING_API_SECRET
 
 
+# bot/handlers.py - FIX receive_api_secret
+
 async def receive_api_secret(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Receive API secret and save credentials"""
     user = update.effective_user
@@ -421,38 +423,54 @@ async def receive_api_secret(update: Update, context: ContextTypes.DEFAULT_TYPE)
         text="🔄 Testing API credentials..."
     )
     
-    async with DeltaExchangeAPI(session['api_key'], api_secret) as api:
-        test_result = await api.get_wallet_balance()
+    try:
+        async with DeltaExchangeAPI(session['api_key'], api_secret) as api:
+            test_result = await api.get_wallet_balance()
+        
+        if 'error' in test_result:
+            await context.bot.send_message(
+                chat_id=user.id,
+                text=f"❌ API test failed: {test_result.get('error')}\n\n"
+                     "Please check your credentials and try again.",
+                reply_markup=get_api_management_keyboard()
+            )
+            clear_user_session(user.id)
+            return ConversationHandler.END
     
-    if 'error' in test_result:
+    except Exception as e:
+        bot_logger.error(f"❌ API validation error: {e}")
         await context.bot.send_message(
             chat_id=user.id,
-            text=f"❌ API test failed: {test_result.get('error')}\n\n"
+            text=f"❌ API validation failed: {str(e)}\n\n"
                  "Please check your credentials and try again.",
             reply_markup=get_api_management_keyboard()
         )
         clear_user_session(user.id)
         return ConversationHandler.END
     
-    # Encrypt and save credentials
+    # ✅ FIX: Use Telegram user ID as string, not MongoDB _id
     db = Database.get_database()
-    user_data = await crud.get_user_by_telegram_id(db, user.id)
+    user_id = str(user.id)  # ← Convert Telegram ID to string
     
+    # Encrypt credentials
     encrypted_key = encryptor.encrypt(session['api_key'])
     encrypted_secret = encryptor.encrypt(api_secret)
     
+    # ✅ FIX: Pass user_id (Telegram ID string) instead of user_data['_id']
     api_id = await crud.create_api_credential(
         db,
-        user_data['_id'],
+        user_id,  # ← Pass Telegram ID as string
         session['api_nickname'],
         encrypted_key,
         encrypted_secret
     )
     
+    # ✅ FIX: Use user_id for querying too
+    apis = await crud.get_user_api_credentials(db, user_id)
+    
     # Set as active if first API
-    apis = await crud.get_user_api_credentials(db, user_data['_id'])
     if len(apis) == 1:
-        await crud.set_active_api(db, user_data['_id'], api_id)
+        await crud.set_active_api(db, user_id, api_id)
     
     await context.bot.send_message(
         chat_id=user.id,
