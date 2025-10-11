@@ -679,14 +679,26 @@ async def activate_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def delete_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Delete API"""
     query = update.callback_query
+    await query.answer()
+    
     api_id = query.data.split('_')[-1]
     
     db = Database.get_database()
-    await crud.delete_api_credential(db, api_id)
+    user_id = str(query.from_user.id)
     
-    await query.answer("✅ API deleted!", show_alert=True)
-    await list_apis(update, context)
-
+    bot_logger.info(f"🗑️ Deleting API: user={user_id}, api_id={api_id}")
+    
+    try:
+        await crud.delete_api_credential(db, user_id, ObjectId(api_id))
+        
+        bot_logger.info(f"✅ API deleted successfully")
+        
+        await query.answer("✅ API deleted!", show_alert=True)
+        await list_apis(update, context)
+        
+    except Exception as e:
+        bot_logger.error(f"❌ Delete API failed: {e}")
+        await query.answer(f"❌ Delete failed: {str(e)}", show_alert=True)
 
 # ==================== CALLBACK QUERY HANDLERS ====================
 
