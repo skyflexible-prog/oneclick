@@ -608,9 +608,9 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     # ✅ SKIP strangle action callbacks - DON'T HANDLE THEM HERE
-    elif data in ["strangle_create", "strangle_execute", "strangle_manage"]:
+    #elif data in ["strangle_create", "strangle_execute", "strangle_manage"]:
         # Let ConversationHandler process these
-        return  # ✅ ADD RETURN HERE - DON'T CONTINUE TO FALLBACK
+        #return  # ✅ ADD RETURN HERE - DON'T CONTINUE TO FALLBACK
     
     # Help
     elif data == "help":
@@ -651,10 +651,11 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     # ✅ FALLBACK - Only reached if no match above
-    await query.edit_message_text(
-        "Please select an option:",
-        reply_markup=get_main_menu_keyboard()
-    )
+    if not data.startswith("strangle_"):
+        await query.edit_message_text(
+            "Please select an option:",
+            reply_markup=get_main_menu_keyboard()
+        )
 
 # ==================== STRATEGY MANAGEMENT HANDLERS ====================
 
