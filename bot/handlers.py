@@ -537,21 +537,28 @@ async def receive_api_secret(update: Update, context: ContextTypes.DEFAULT_TYPE)
     return ConversationHandler.END
 
 
+# bot/handlers.py - COMPLETE FIXED VERSION
+
 async def list_apis(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """List all user APIs"""
-    user = update.effective_user
+    query = update.callback_query
+    await query.answer()
+    
+    user = query.from_user
     db = Database.get_database()
     
-    user_data = await crud.get_user_by_telegram_id(db, user.id)
-    if not user_data:
-        await update.callback_query.answer("Please use /start first")
-        return
+    # ✅ FIX: Use Telegram user ID as string
+    user_id = str(user.id)
     
-    apis = await crud.get_user_api_credentials(db, user_data['_id'])
+    bot_logger.info(f"📋 Listing APIs for user {user_id}")
+    
+    # ✅ FIX: Query with user_id string, not user_data['_id']
+    apis = await crud.get_user_api_credentials(db, user_id)
+    
+    bot_logger.info(f"   Found {len(apis)} API(s)")
     
     if not apis:
-        await update.callback_query.answer()
-        await update.callback_query.edit_message_text(
+        await query.edit_message_text(
             "📋 <b>API Credentials</b>\n\n"
             "You haven't added any API credentials yet.",
             parse_mode=ParseMode.HTML,
@@ -559,10 +566,19 @@ async def list_apis(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     
-    await update.callback_query.answer()
-    await update.callback_query.edit_message_text(
-        "📋 <b>Your API Credentials</b>\n\n"
-        "Select an API to view details:",
+    # Build message with all APIs
+    message = "📋 <b>Your API Credentials</b>\n\n"
+    
+    for i, api in enumerate(apis, 1):
+        status = "✅ Active" if api.get('is_active') else "⚪ Inactive"
+        message += f"<b>{i}. {api.get('nickname')}</b>\n"
+        message += f"   Status: {status}\n"
+        message += f"   ID: <code>{str(api.get('_id'))}</code>\n\n"
+    
+    message += f"<b>Total:</b> {len(apis)} API(s)"
+    
+    await query.edit_message_text(
+        message,
         parse_mode=ParseMode.HTML,
         reply_markup=get_api_list_keyboard(apis)
     )
