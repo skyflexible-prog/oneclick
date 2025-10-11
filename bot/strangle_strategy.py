@@ -74,7 +74,7 @@ async def start_strangle_create(update: Update, context: ContextTypes.DEFAULT_TY
     query = update.callback_query
     await query.answer()
     
-    user_id = query.from_user.id
+    user_id = str(query.from_user.id)
     db = Database.get_database()
     
     # Get user's APIs
