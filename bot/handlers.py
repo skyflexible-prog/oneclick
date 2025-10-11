@@ -578,6 +578,33 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     
+    # ✅ ADD THIS - Strangle Menu Handler
+    elif data == "strangle_menu":
+        strangle_text = (
+            "🎲 <b>Strangle Strategy</b>\n\n"
+            "A strangle involves buying/selling OTM call and put options.\n\n"
+            "<b>Features:</b>\n"
+            "• <b>Long Strangle:</b> Buy OTM Call + Put\n"
+            "• <b>Short Strangle:</b> Sell OTM Call + Put\n"
+            "• Percentage or ATM offset strike selection\n"
+            "• Advanced stop-loss options\n\n"
+            "Choose an option:"
+        )
+        
+        keyboard = [
+            [InlineKeyboardButton("📝 Create Preset", callback_data="strangle_create")],
+            [InlineKeyboardButton("▶️ Execute Preset", callback_data="strangle_execute")],
+            [InlineKeyboardButton("📋 Manage Presets", callback_data="strangle_manage")],
+            [InlineKeyboardButton("🔙 Back to Main Menu", callback_data="main_menu")]
+        ]
+        
+        await query.edit_message_text(
+            strangle_text,
+            parse_mode=ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+        return
+    
     # Help
     elif data == "help":
         help_text = (
