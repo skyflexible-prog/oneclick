@@ -2032,12 +2032,12 @@ async def confirm_trade_execution(update: Update, context: ContextTypes.DEFAULT_
         )
         return ConversationHandler.END
     
-    # Save trade to database
-    user_data = await crud.get_user_by_telegram_id(db, user.id)
+        # ✅ NEW
+    user_id = str(user.id)
     actual_api_id = ObjectId(selected_api_id) if selected_api_id else strategy['api_id']
 
     trade_data = {
-        'user_id': user_data['_id'],
+        'user_id': user_id,
         'api_id': actual_api_id,
         'strategy_id': strategy_id,
         'call_symbol': preview['call_symbol'],
