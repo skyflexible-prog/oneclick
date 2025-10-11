@@ -78,7 +78,7 @@ async def start_strangle_create(update: Update, context: ContextTypes.DEFAULT_TY
     db = Database.get_database()
     
     # Get user's APIs
-    apis = await crud.get_user_api_credentials(db, str(user_id))
+    apis = await crud.get_user_api_credentials(db, user_id)
     
     if not apis:
         await query.edit_message_text(
