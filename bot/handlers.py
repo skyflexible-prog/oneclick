@@ -2445,3 +2445,20 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         bot_logger.error(f"Error in error handler: {e}")
     
+
+# bot/handlers.py - ADD THIS FUNCTION
+
+async def cancel_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Cancel any ongoing conversation"""
+    user = update.effective_user
+    bot_logger.info(f"❌ User {user.id} cancelled conversation")
+    
+    context.user_data.clear()
+    
+    await update.message.reply_text(
+        "❌ Operation cancelled.",
+        reply_markup=get_main_menu_keyboard()
+    )
+    
+    return ConversationHandler.END
+    
