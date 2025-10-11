@@ -723,101 +723,35 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     
     data = query.data
-    bot_logger.info(f"🔘 Button callback: {data}")
+    bot_logger.info(f"🔘 Button: {data}")
     
-    # Main menu
     if data == "main_menu":
         await query.edit_message_text(
             "🏠 <b>Main Menu</b>\n\nSelect an option:",
             parse_mode=ParseMode.HTML,
             reply_markup=get_main_menu_keyboard()
         )
-        return
-    
-    # API menu
     elif data == "api_menu":
         await query.edit_message_text(
-            "🔑 <b>API Management</b>\n\nManage your Delta Exchange API keys:",
+            "🔑 <b>API Management</b>",
             parse_mode=ParseMode.HTML,
             reply_markup=get_api_management_keyboard()
         )
-        return
-    
-    # List APIs
     elif data == "list_apis":
         await list_apis(update, context)
-        return
-    
-    # Add API
     elif data == "add_api":
         await add_api(update, context)
-        return
-    
-    # Strangle menu
-    elif data == "strangle_menu":
-        bot_logger.info("🎲 Showing Strangle menu")
-        
-        strangle_text = (
-            "🎲 <b>Strangle Strategy</b>\n\n"
-            "A strangle involves buying/selling OTM call and put options.\n\n"
-            "<b>Features:</b>\n"
-            "• <b>Long Strangle:</b> Buy OTM Call + Put\n"
-            "• <b>Short Strangle:</b> Sell OTM Call + Put\n"
-            "• Percentage or ATM offset strike selection\n"
-            "• Advanced stop-loss options\n\n"
-            "Choose an option:"
-        )
-        
-        keyboard = [
-            [InlineKeyboardButton("📝 Create Preset", callback_data="strangle_create")],
-            [InlineKeyboardButton("▶️ Execute Preset", callback_data="strangle_execute")],
-            [InlineKeyboardButton("📋 Manage Presets", callback_data="strangle_manage")],
-            [InlineKeyboardButton("🔙 Back to Main Menu", callback_data="main_menu")]
-        ]
-        
-        await query.edit_message_text(
-            strangle_text,
-            parse_mode=ParseMode.HTML,
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
-        return
-    
-    # Help
     elif data == "help":
-        help_text = (
-            "❓ <b>Help & Support</b>\n\n"
-            "<b>How to use this bot:</b>\n\n"
-            "1️⃣ <b>Add API Keys:</b>\n"
-            "   • Click 'API Keys'\n"
-            "   • Add your Delta Exchange credentials\n"
-            "   • Activate the API you want to use\n\n"
-            "2️⃣ <b>Create Strategy:</b>\n"
-            "   • Click 'Strategies'\n"
-            "   • Configure your trading parameters\n"
-            "   • Save the strategy\n\n"
-            "3️⃣ <b>Execute Trade:</b>\n"
-            "   • Click 'Trade'\n"
-            "   • Select your strategy\n"
-            "   • Confirm execution\n\n"
-            "<b>Need help?</b> Contact support."
-        )
-        
-        keyboard = [
-            [InlineKeyboardButton("🔙 Back to Menu", callback_data="main_menu")]
-        ]
-        
         await query.edit_message_text(
-            help_text,
+            "❓ <b>Help</b>",
             parse_mode=ParseMode.HTML,
-            reply_markup=InlineKeyboardMarkup(keyboard)
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="main_menu")]])
         )
-        return
-    
-    # Fallback
-    await query.edit_message_text(
-        "Please select an option:",
-        reply_markup=get_main_menu_keyboard()
-    )
+    else:
+        await query.edit_message_text(
+            "Select:",
+            reply_markup=get_main_menu_keyboard()
+        )
 
 
 async def create_strategy_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
