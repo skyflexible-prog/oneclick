@@ -1697,13 +1697,15 @@ async def execute_trade_preview(update: Update, context: ContextTypes.DEFAULT_TY
         await query.answer("Strategy not found", show_alert=True)
         return ConversationHandler.END
     
-    # Get API credentials - use selected API or strategy's default
-    user_data = await crud.get_user_by_telegram_id(db, user.id)
-    selected_api_id = context.user_data.get('selected_api_id')
+    # ✅ NEW - Fixed pattern
+user_id = str(user.id)
+selected_api_id = context.user_data.get('selected_api_id')
 
-    if selected_api_id:
-        # Use the API selected in trade_menu
-        api_data = await crud.get_api_credential_by_id(db, ObjectId(selected_api_id))
+if selected_api_id:
+    api_data = await crud.get_api_credential_by_id(db, ObjectId(selected_api_id))
+else:
+    api_data = await crud.get_api_credential_by_id(db, strategy['api_id'])
+
     else:
         # Fallback to strategy's default API
         api_data = await crud.get_api_credential_by_id(db, strategy['api_id'])
