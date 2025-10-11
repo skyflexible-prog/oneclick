@@ -665,15 +665,26 @@ async def view_api_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def activate_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Activate API"""
     query = update.callback_query
+    await query.answer()
+    
     api_id = query.data.split('_')[-1]
-    user = query.from_user
     
     db = Database.get_database()
-    user_data = await crud.get_user_by_telegram_id(db, user.id)
-    await crud.set_active_api(db, user_data['_id'], api_id)
+    user_id = str(query.from_user.id)
     
-    await query.answer("✅ API activated!", show_alert=True)
-    await view_api_details(update, context)
+    bot_logger.info(f"✅ Activating API: user={user_id}, api_id={api_id}")
+    
+    try:
+        await crud.set_active_api(db, user_id, ObjectId(api_id))
+        
+        bot_logger.info(f"✅ API activated successfully")
+        
+        await query.answer("✅ API activated!", show_alert=True)
+        await list_apis(update, context)
+        
+    except Exception as e:
+        bot_logger.error(f"❌ Activate API failed: {e}")
+        await query.answer(f"❌ Activation failed: {str(e)}", show_alert=True)
 
 
 async def delete_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
