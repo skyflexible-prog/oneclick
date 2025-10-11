@@ -5,17 +5,25 @@ from typing import List, Dict
 def get_main_menu_keyboard() -> InlineKeyboardMarkup:
     """Main menu keyboard"""
     keyboard = [
-        [InlineKeyboardButton("📊 Trade", callback_data="trade")],
-        [InlineKeyboardButton("📈 Positions", callback_data="positions")],
         [
-            InlineKeyboardButton("⚙️ APIs", callback_data="list_apis"),
-            InlineKeyboardButton("🎯 Strategies", callback_data="list_strategies")
+            InlineKeyboardButton("📊 Trade", callback_data="trade"),
+            InlineKeyboardButton("📋 Orders", callback_data="orders_menu")
+        ],
+        [
+            InlineKeyboardButton("💼 Positions", callback_data="positions"),
+            InlineKeyboardButton("📈 History", callback_data="history")
         ],
         [
             InlineKeyboardButton("💰 Balance", callback_data="balance"),
-            InlineKeyboardButton("📜 History", callback_data="history")
+            InlineKeyboardButton("⚙️ Strategies", callback_data="strategies")
         ],
-        [InlineKeyboardButton("❓ Help", callback_data="help")]
+        [
+            InlineKeyboardButton("🎲 Strangle", callback_data="strangle_menu")  # ✅ NEW
+        ],
+        [
+            InlineKeyboardButton("🔑 API Keys", callback_data="list_apis"),
+            InlineKeyboardButton("❓ Help", callback_data="help")
+        ]
     ]
     return InlineKeyboardMarkup(keyboard)
 
